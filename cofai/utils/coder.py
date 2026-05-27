@@ -1,5 +1,13 @@
 import torch
-import torchac
+
+torchac = None
+
+def _get_torchac():
+    global torchac
+    if torchac is None:
+        import torchac as _torchac
+        torchac = _torchac
+    return torchac
 
 
 def pmf_to_cdf(pmf):
@@ -35,8 +43,7 @@ def encode_uniform_to_bits(indices, alphabet_size):
     pmf = get_uniform_pmf(batch_size, alphabet_size)
     cdf = pmf_to_cdf(pmf)
     
-    # 使用算术编码
-    bitstream = torchac.encode_float_cdf(
+    bitstream = _get_torchac().encode_float_cdf(
         cdf_float=cdf,
         sym=indices.to(dtype=torch.int16).cpu(),
         check_input_bounds=True,
@@ -61,8 +68,7 @@ def decode_uniform_from_bits(bitstream, batch_size, alphabet_size):
     pmf = get_uniform_pmf(batch_size, alphabet_size)
     cdf = pmf_to_cdf(pmf)
     
-    # 使用算术解码
-    indices = torchac.decode_float_cdf(cdf, bitstream)
+    indices = _get_torchac().decode_float_cdf(cdf, bitstream)
     
     return indices
 

@@ -4,6 +4,7 @@ from .bypass import Dinov2TimmBypass
 # from .vqfc import Dinov2VQFCCodec  # Skip to avoid mmcv dependency
 
 from .mlore import MLoREFrameCodec, MLoREVideoCodec, MLoREWrapperCodec
+from .orfc import Dinov2ClsORFC, Dinov2SlideSegORFC
 
 __all__ = [
     "MPC_I1",
@@ -22,4 +23,7 @@ __all__ = [
     "MLoREFrameCodec",
     "MLoREVideoCodec",
     "MLoREWrapperCodec",
+    # ORFC models
+    "Dinov2ClsORFC",
+    "Dinov2SlideSegORFC",
 ]

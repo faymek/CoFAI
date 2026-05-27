@@ -7,6 +7,7 @@ import random
 import cv2
 import torch
 from torchvision.transforms import InterpolationMode
+from torchvision.transforms.v2 import CenterCrop as TvCenterCrop
 from torchvision.transforms.v2 import Resize as TvResize
 
 
@@ -168,12 +169,14 @@ class ResizeImage:
         size: Any,
         keys: Optional[Sequence[str]] = None,
         *,
-        interpolation: InterpolationMode = InterpolationMode.BILINEAR,
+        interpolation: Any = InterpolationMode.BILINEAR,
         max_size: Optional[int] = None,
         antialias: Optional[bool] = True,
     ):
         self._size = size
         self._keys: tuple[str, ...] = ("img",) if keys is None else tuple(keys)
+        if isinstance(interpolation, str):
+            interpolation = InterpolationMode[interpolation.upper()]
         self._resize = TvResize(
             size=size,
             interpolation=interpolation,
@@ -190,6 +193,36 @@ class ResizeImage:
                 a = a[..., np.newaxis]
             t = torch.from_numpy(np.ascontiguousarray(a)).float().permute(2, 0, 1)
             t = self._resize(t)
+            sample[key] = (
+                t.permute(1, 2, 0).contiguous().cpu().numpy().astype(np.float32, copy=False)
+            )
+        return sample
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(size={self._size!r}, keys={self._keys!r})"
+
+
+class CenterCropImage:
+    """Thin adapter over ``torchvision.transforms.v2.CenterCrop``.
+
+    Applies a center crop of the given ``size`` to each ``sample[key]``.
+    Sample entries must be **HWC** ``numpy`` arrays.
+    """
+
+    def __init__(self, size: Any, keys: Optional[Sequence[str]] = None):
+        self._size = size
+        self._keys: tuple[str, ...] = ("img",) if keys is None else tuple(keys)
+        self._crop = TvCenterCrop(size=size)
+
+    def __call__(self, sample):
+        for key in self._keys:
+            if key not in sample:
+                continue
+            a = np.asarray(sample[key])
+            if a.ndim == 2:
+                a = a[..., np.newaxis]
+            t = torch.from_numpy(np.ascontiguousarray(a)).float().permute(2, 0, 1)
+            t = self._crop(t)
             sample[key] = (
                 t.permute(1, 2, 0).contiguous().cpu().numpy().astype(np.float32, copy=False)
             )

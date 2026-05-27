@@ -1,0 +1,65 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: voc2012_sel100
+  - /model: ORFC-dinov2-vitg14-seg
+  - /heads: dinov2_head
+  - /metrics:
+    - voc2012_seg_metrics
+  - _self_
+
+name: voc2012-sel100--ORFC-dinov2-vitg14-seg-blk29
+description: "ORFC + DINOv2 ViT-G/14 segmentation on VOC2012 sel100 with sliding window. Sweeps K at blk29."
+dataset: ${datasets.voc2012_sel100}
+test_transforms:
+  - type: cofai.transforms.ResizeImage
+    size: [512]
+    keys: [img]
+  - type: cofai.transforms.ResizeImage
+    size: [512]
+    keys: [semseg]
+    interpolation: NEAREST
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    kind: semseg
+    meter: ${metrics.voc2012_seg_metrics}
+model:
+  dino_backbone:
+    slot: -10
+  orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K64_e32.npz
+  K: 64
+  embedding_dim: 32
+  heads:
+    semseg: ${heads.voc2012_seg_giant_last1}
+
+multi_run:
+  4:
+    model:
+      K: 4
+      orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K4_e32.npz
+  8:
+    model:
+      K: 8
+      orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K8_e32.npz
+  16:
+    model:
+      K: 16
+      orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K16_e32.npz
+  64:
+    model:
+      K: 64
+      orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K64_e32.npz
+  256:
+    model:
+      K: 256
+      orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K256_e32.npz
+  64_e16:
+    model:
+      K: 64
+      embedding_dim: 16
+      orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitg14/blk29_K64_e16.npz

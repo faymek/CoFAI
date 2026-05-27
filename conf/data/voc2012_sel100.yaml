@@ -1,0 +1,8 @@
+# @package _global_
+datasets:
+  voc2012_sel100:
+    type: SegmentationDataset
+    root: ${PROJECT_ROOT}/data/VOC2012_sel100
+    img_path: JPEGImages
+    seg_map_path: SegmentationClass
+    file_list: voc2012_val_100.txt

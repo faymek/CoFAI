@@ -9,6 +9,7 @@ transform composition should be imported from here.
 
 from cofai.transforms.core import (
     AddIgnoreRegions,
+    CenterCropImage,
     Normalize,
     PadImage,
     PadToMultiple,
@@ -33,6 +34,7 @@ from cofai.transforms.mlore import (  # legacy builders used by cofai.datasets.m
 
 __all__ = [
     # core blocks (YAML-friendly)
+    "CenterCropImage",
     "RandomScaling",
     "ResizeImage",
     "ResizeToFit",

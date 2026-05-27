@@ -1,0 +1,10 @@
+# @package _global_
+datasets:
+  imagenet_sel500:
+    type: ClassificationDataset
+    root: ${PROJECT_ROOT}/data/ImageNet_val_sel500
+    split: img
+    labels_file: imagenet_val_labels.txt
+    file_list: labels.txt
+    return_dict: true
+    label_key: cls

@@ -1,0 +1,20 @@
+# @package _global_
+# ORFC segmentation with DINOv2 ViT-L/14 (24 blocks), sliding window
+# Default: blk10 (encode blocks 0-10, slot=-13, decode blocks 11-23)
+model:
+  type: Dinov2SlideSegORFC
+  dino_backbone:
+    model_size: large
+    img_size: 518
+    patch_size: 14
+    dynamic_size: false
+    slot: -13
+    n_last_blocks: 1
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov2/backbone/dinov2_vitl14_pretrain.pth
+  orfc_weights_path: ${PROJECT_ROOT}/weights/orfc/dinov2_vitl14/blk10_K64_e32.npz
+  K: 64
+  embedding_dim: 32
+  slide_size: [512, 512]
+  slide_stride: [341, 341]
+  heads:
+    semseg: null
