@@ -347,11 +347,15 @@ class GeneralDecoder(nn.Module):
             self.to(device)
         self.eval()
 
-    def interpolate_pos_encoding(self, token_res) -> torch.Tensor:
+    def interpolate_pos_encoding(
+        self, token_res: Optional[Tuple[int, int]] = None
+    ) -> torch.Tensor:
+        side = int(self.num_patches**0.5)
+        if token_res is None:
+            token_res = (side, side)
         class_pe = self.decoder_pos_embed[:, 0:1, :]
         patch_pe = self.decoder_pos_embed[:, 1:, :]
-        grid = int(self.num_patches**0.5)
-        patch_pe_2d = rearrange(patch_pe, "b (h w) c -> b c h w", h=grid, w=grid)
+        patch_pe_2d = rearrange(patch_pe, "b (h w) c -> b c h w", h=side, w=side)
         patch_pe_2d = F.interpolate(
             patch_pe_2d,
             size=token_res,
@@ -397,11 +401,12 @@ class GeneralDecoder(nn.Module):
         x_ = self.decoder_embed(features)
         if token_format == "cls,patch":
             x_ = x_[:, 1:, :]
-        decoder_pos_embed = self.decoder_pos_embed
 
         H, W = token_res
         if H * W != self.num_patches:
             decoder_pos_embed = self.interpolate_pos_encoding(token_res)
+        else:
+            decoder_pos_embed = self.decoder_pos_embed
 
         cls_token = self.trainable_cls_token.expand(x_.shape[0], -1, -1)
         h = torch.cat([cls_token, x_], dim=1)
