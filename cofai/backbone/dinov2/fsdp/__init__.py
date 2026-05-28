@@ -7,7 +7,7 @@ import os
 from typing import Any
 
 import torch
-import cofai.backbone.dinov2.distributed as distributed
+import dinov2.distributed as distributed
 from functools import partial
 from fvcore.common.checkpoint import Checkpointer
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP

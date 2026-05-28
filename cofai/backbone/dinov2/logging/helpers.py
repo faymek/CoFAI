@@ -11,7 +11,7 @@ import time
 
 import torch
 
-import cofai.backbone.dinov2.distributed as distributed
+import dinov2.distributed as distributed
 
 
 logger = logging.getLogger("dinov2")

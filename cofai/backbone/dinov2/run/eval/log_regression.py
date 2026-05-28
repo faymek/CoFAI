@@ -7,9 +7,9 @@ import logging
 import os
 import sys
 
-from cofai.backbone.dinov2.eval.log_regression import get_args_parser as get_log_regression_args_parser
-from cofai.backbone.dinov2.logging import setup_logging
-from cofai.backbone.dinov2.run.submit import get_args_parser, submit_jobs
+from dinov2.eval.log_regression import get_args_parser as get_log_regression_args_parser
+from dinov2.logging import setup_logging
+from dinov2.run.submit import get_args_parser, submit_jobs
 
 
 logger = logging.getLogger("dinov2")
@@ -20,7 +20,7 @@ class Evaluator:
         self.args = args
 
     def __call__(self):
-        from cofai.backbone.dinov2.eval.log_regression import main as log_regression_main
+        from dinov2.eval.log_regression import main as log_regression_main
 
         self._setup_args()
         log_regression_main(self.args)

@@ -9,7 +9,7 @@ import os
 import sys
 from typing import Optional
 
-import cofai.backbone.dinov2.distributed as distributed
+import dinov2.distributed as distributed
 from .helpers import MetricLogger, SmoothedValue
 
 
