@@ -54,7 +54,11 @@ CoFAI/
 ```
 
 
-## 测试方法
+
+
+
+
+## 测试方法（专用脚本 `run_eval.py`，参考）
 
 在仓库根目录执行（需已设置 `PROJECT_ROOT`，见项目 README）。默认按 `--quality` **只跑一轮**；若要与 YAML 中的 `multi_run` 一致、扫多个 quality，请加 **`--multi-run`**。
 
@@ -85,6 +89,16 @@ CUDA_VISIBLE_DEVICES=0 poetry run python examples/mpc/run_eval.py \
     --quality 32 \
     --cuda --recon 0 --real \
     --output_dir logs/ade20k_val_seg_mpc2_dino_small_vbr
+
+# MPC2 DINO Base reg4 VBR 测试 RAE 重建图像
+CUDA_VISIBLE_DEVICES=0 poetry run python examples/mpc/run_eval.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_MPC2-v3-base-vbr-reg4.yaml \
+    --preset imagenet_sel2k_cls \
+    --head rae_dinov2_base_reg4_512px \
+    --recon 1 \
+    --cuda \
+    --multi-run \
+    --output_dir logs/rae_mpc2_base_vbr_multirun_imagenet2k
 ```
 
 参数说明：
@@ -97,3 +111,26 @@ CUDA_VISIBLE_DEVICES=0 poetry run python examples/mpc/run_eval.py \
 - `--cuda`: 使用CUDA
 - `--recon`: 对于MPC模型，使用第几层分支的重建图像，当前可选[0,1,2]
 - `--real`: 启用真实熵编码，写入码流；否则使用码率估计，不写入码流
+
+
+## 通用评测（cofai-eval plan）
+
+推荐使用统一评测引擎 **`poetry run cofai-eval`**（与 `python -m cofai.engine.run_eval` 相同）。在仓库根目录执行，Plan 位于 **`conf/plan/`**，通用参数与语义见 **[docs/engine.md](../../docs/engine.md)**。
+
+```bash
+# MPC2-v3 base VBR reg4 + RAE，ImageNet sel2k（plan 内 multi_run 扫 qp 0/8/…/64）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/imagenet-sel2k--MPC2-v3-base-vbr-reg4-rae-512px.yaml \
+  args.cuda=true \
+  args.multi_run=true
+```
+
+常用覆盖（Hydra 语法）：
+
+- `args.cuda=true` / `args.real=true`（是否真实熵编解码，默认 `real: false`）
+- `args.multi_run=true`（按 plan 的 `multi_run` 多档 quality，结果在 `logs/<plan.name>/q<qp>/` 与 `summary.json`）
+- `args.quality=16`（单档，且不加 `args.multi_run=true` 时）
+- `args.output_dir=logs/my_run`（可选；默认 `logs/<plan.name>/`）
+- `args.max_samples=10`（调试）
+
+---

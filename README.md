@@ -102,6 +102,12 @@ The Multi-Purpose Compression (MPC) framework is a coding architecture designed 
 
 For implementation details and usage examples, please refer to the directory `examples/mpc/` and its dedicated [README](examples/mpc/README.md).
 
+### Testing RAE (AITISA AI M2417)
+
+RAE is currently provided as an extra capability under the MPC evaluation setup: it uses the **same codec** as MPC, but decodes images with an **RAE decoder** (image reconstruction from the coded representation).
+
+RAE benchmarks can be run with **`poetry run cofai-eval`** and plans under `conf/plan/`; see **[examples/mpc/README.md](examples/mpc/README.md)** for examples.
+
 ### Testing VQFC (AITISA AI M2353)
 
 > "Transform-Free Feature Coding via Entropy-Constrained Vector Quantization" (AAAI 2026)
