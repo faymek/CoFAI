@@ -34,7 +34,7 @@ model:
     slot: -3
     n_last_blocks: 4
     with_registers: true
-    rae_decode_blocks: 0
+    rae_decode_blocks: ~
 
   dino_codec:
     type: cofai.latent_codecs.vit_feature_codec.VbrVitUnionLatentCodec
