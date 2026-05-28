@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import torch
 
-from CoFAI.cofai.engine.run_eval import (
+from cofai.engine.run_eval import (
     _bits_from_coded_unit,
     eval_step,
     inference_model,
 )
-from CoFAI.cofai.engine.schema import EvalBatch
+from cofai.engine.schema import EvalBatch
 
 
 def test_calc_bits_strings():

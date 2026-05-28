@@ -93,7 +93,7 @@ def _resolve_cfg(p: Any = None, cfg: Optional[MLoRETransformsConfig] = None) -> 
 def get_mlore_train_transforms(p: Any = None, cfg: Optional[MLoRETransformsConfig] = None):
     """Return the RFC/MLoRE *training* transform pipeline (augment + pad + tensor)."""
     import torchvision
-    from CoFAI.cofai import transforms
+    from cofai import transforms
 
     c = _resolve_cfg(p, cfg)
     ops: List[Any] = []
@@ -137,7 +137,7 @@ def get_mlore_train_transforms(p: Any = None, cfg: Optional[MLoRETransformsConfi
 def get_mlore_val_transforms(p: Any = None, cfg: Optional[MLoRETransformsConfig] = None):
     """Return the RFC/MLoRE *validation/test* transform pipeline (normalize + pad + tensor)."""
     import torchvision
-    from CoFAI.cofai import transforms
+    from cofai import transforms
 
     c = _resolve_cfg(p, cfg)
     _aligned_keys = MLORE_ALIGNED_KEYS

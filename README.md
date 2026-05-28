@@ -110,6 +110,12 @@ VQFC proposes a **transform-free** pipeline that directly encodes features via v
 
 For implementation details and usage examples, please refer to the directory `examples/vqfc/` and its dedicated [README](examples/vqfc/README.md).
 
+### Testing VTC (AITISA AI M2418)
+
+The **Visual Token Codec (VTC)** compresses global tokens and patch tokens separately. The key is that, for the dominant patch tokens, the method uses a spatial–channel context model to explicitly capture their spatial correlation. Experiments on image classification and segmentation tasks show that VTC significantly outperforms existing methods.
+
+See [`conf/model/VTC-*.yaml`](conf/model/) for VTC model presets; run **`poetry run cofai-eval`** following [docs/engine.md](docs/engine.md). Codec implementation: [`cofai/latent_codecs/vtc.py`](cofai/latent_codecs/vtc.py).
+
 ### Testing CAVC (AITISA AI M2328)
 
 CAVC is a video-feature joint coding framework proposed by AI M2328. It regulates video pixel distributions through context prompts and visual feature guidance, enabling targeted adaptation to different coding scenarios, such as human perceptual optimization, objective fidelity optimization, and machine vision tasks including object detection. During training, it adopts an advanced end-to-end compression proxy network to ensure effective gradient backpropagation; during inference, the compressor can be replaced with any end-to-end network or standard coding tool, providing strong compatibility.

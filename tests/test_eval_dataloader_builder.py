@@ -63,8 +63,8 @@ class DummyDataLoaderBuilder:
 
 
 def test_run_eval_uses_default_dataloader_when_plan_has_no_dataloader_key(monkeypatch):
-    from CoFAI.cofai.engine import run_eval as runner_mod
-    from CoFAI.cofai.engine import builder as builder_mod
+    from cofai.engine import run_eval as runner_mod
+    from cofai.engine import builder as builder_mod
 
     called = {"n": 0}
 

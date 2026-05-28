@@ -2,7 +2,7 @@
 
 import inspect
 
-from CoFAI.cofai.engine import run_eval
+from cofai.engine import run_eval
 
 
 def test_run_eval_exists():
