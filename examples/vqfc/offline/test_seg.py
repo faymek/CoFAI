@@ -3,7 +3,7 @@ import random
 import sys
 import numpy as np
 import torch
-from CoFAI.cofai.models.vqfc import Dinov2VQFCCodec
+from cofai.models.vqfc import Dinov2VQFCCodec
 import os
 from dotenv import load_dotenv
 

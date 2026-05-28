@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
-from CoFAI.examples.vqfc.offline.dataset_seg import Dinov2DatasetTrain
-from CoFAI.cofai.models.vqfc import Dinov2VQFCCodec
+from dataset_seg import Dinov2DatasetTrain
+from cofai.models.vqfc import Dinov2VQFCCodec
 from dotenv import load_dotenv
 
 load_dotenv()

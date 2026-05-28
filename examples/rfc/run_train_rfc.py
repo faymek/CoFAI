@@ -57,7 +57,7 @@ from utils.common_config import (
 )
 from utils.logger import Logger
 from utils.test_utils import test_phase
-from CoFAI.examples.rfc.evaluation.evaluate_utils import PerformanceMeter
+from evaluation.evaluate_utils import PerformanceMeter
 
 
 # 设置环境

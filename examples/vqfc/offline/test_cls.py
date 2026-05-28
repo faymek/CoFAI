@@ -4,7 +4,7 @@ import argparse
 import torch
 import numpy as np
 from tqdm import tqdm
-from CoFAI.cofai.models.vqfc import Dinov2VQFCCodec
+from cofai.models.vqfc import Dinov2VQFCCodec
 import time
 from dotenv import load_dotenv
 

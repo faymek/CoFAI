@@ -39,33 +39,33 @@ def get_single_task_meter(p, database, task):
 
     # ignore index based on transforms.AddIgnoreRegions
     if task == 'semseg':
-        from CoFAI.examples.rfc.evaluation.eval_semseg import SemsegMeter
+        from evaluation.eval_semseg import SemsegMeter
         return SemsegMeter(database, ignore_idx=p.ignore_index)
     
     if task == 'scene':
-        from CoFAI.examples.rfc.evaluation.eval_scene import ClassificationMeter
+        from evaluation.eval_scene import ClassificationMeter
         return ClassificationMeter(database)
 
     elif task == 'human_parts':
-        from CoFAI.examples.rfc.evaluation.eval_human_parts import HumanPartsMeter
+        from evaluation.eval_human_parts import HumanPartsMeter
         return HumanPartsMeter(database, ignore_idx=p.ignore_index)
 
     elif task == 'normals':
-        from CoFAI.examples.rfc.evaluation.eval_normals import NormalsMeter
+        from evaluation.eval_normals import NormalsMeter
         return NormalsMeter(ignore_index=p.ignore_index) 
 
     elif task == 'sal':
-        from CoFAI.examples.rfc.evaluation.eval_sal import  SaliencyMeter
+        from evaluation.eval_sal import  SaliencyMeter
         return SaliencyMeter(ignore_index=p.ignore_index, threshold_step=0.05, beta_squared=0.3)
 
     elif task == 'depth':
-        from CoFAI.examples.rfc.evaluation.eval_depth import DepthMeter
+        from evaluation.eval_depth import DepthMeter
         # Set effective depth evaluation range. Refer to:
         # https://github.com/sjsu-smart-lab/Self-supervised-Monocular-Trained-Depth-Estimation-using-Self-attention-and-Discrete-Disparity-Volum/blob/3c6f46ab03cfd424b677dfeb0c4a45d6269415a9/evaluate_city_depth.py#L55
         return DepthMeter(max_depth=p.TASKS.depth_max, min_depth=p.TASKS.depth_min) 
 
     elif task == 'edge': # just for reference
-        from CoFAI.examples.rfc.evaluation.eval_edge import EdgeMeter
+        from evaluation.eval_edge import EdgeMeter
         return EdgeMeter(pos_weight=p['edge_w'], ignore_index=p.ignore_index)
 
     else:

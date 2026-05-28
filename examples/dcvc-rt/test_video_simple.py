@@ -12,16 +12,16 @@ from cofai.utils.common import (
     dump_json,
     set_torch_env,
 )
-from CoFAI.cofai.entropy_models.dcvc_base import DmcCompressionModel
-from CoFAI.cofai.models.dcvcrt.pframe import DMCP
-from CoFAI.cofai.models.dcvcrt.iframe import DMCI
-from CoFAI.cofai.models.dcvcrt.video import DCVC_RT_Video
-from CoFAI.cofai.metrics.utils import DataFrameRecords
+from cofai.entropy_models.dcvc_base import DmcCompressionModel
+from cofai.models.dcvcrt.pframe import DMCP
+from cofai.models.dcvcrt.iframe import DMCI
+from cofai.models.dcvcrt.video import DCVC_RT_Video
+from cofai.metrics.utils import DataFrameRecords
 
-from CoFAI.cofai.datasets.video_reader import PngSequenceVideoReader, YUV420VideoReader
-from CoFAI.cofai.datasets.video_writer import PngSequenceVideoWriter, YUV420VideoWriter
+from cofai.datasets.video_reader import PngSequenceVideoReader, YUV420VideoReader
+from cofai.datasets.video_writer import PngSequenceVideoWriter, YUV420VideoWriter
 from cofai.utils.metrics import calc_psnr, calc_msssim, calc_msssim_rgb
-from CoFAI.cofai.utils.transforms import (
+from cofai.utils.transforms import (
     rgb2ycbcr,
     ycbcr2rgb,
     yuv_444_to_420,
