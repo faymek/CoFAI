@@ -1,0 +1,70 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: imagenet_sel2k
+  - /heads: dinov2_head
+  - _self_
+
+name: imagenet-sel2k--MPC2-v3-base-vbr-reg4-rae-512px
+description: "data: ImageNet sel2k; model: MPC2-v3 base VBR reg4 + RAE decoder; task: reconstruction. With args.multi_run=true, sweeps qp 0/8/…/64."
+args:
+  real: false
+dataset:
+  type: cofai.datasets.ImageFolder
+  root: ${PROJECT_ROOT}/data/ImageNet_val_sel2k
+  split: img
+  return_dict: true
+  tasks: [rec]
+test_transforms:
+  # Align with examples/mpc/run_eval.py RAE path (center_pad multiple = patch_size * 8).
+  - type: cofai.transforms.PadToMultiple
+    multiple: 128
+    keys: [img, rec]
+  - type: cofai.transforms.ToTensor
+    keys: [img, rec]
+collate:
+  mode: stack_only
+task_configs:
+  - label: rae
+    kind: rec
+    meter:
+      type: cofai.metrics.iqa_metrics.IQAPerSampleMeter
+      metrics: ["PSNR", "MS-SSIM", "LPIPS-Alex"]
+load:
+  path: ${PROJECT_ROOT}/weights/MPC/MPC2-v3-base-vbr-reg4-pruned.pth.tar
+  strict: false
+  rules:
+    - ["startswith", "dino.model", "useless"]
+model:
+  type: MPC_I2
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+    with_registers: true
+    rae_decode_blocks: null
+  dino_codec:
+    type: cofai.latent_codecs.vit_feature_codec.VbrVitUnionLatentCodec
+    h_dim: 768
+    y_dim: 48
+    z_dim: 48
+    groups: 16
+    num_prefix_tokens: 5
+  heads:
+    rec: ${heads.rae_dinov2_base_reg4_512px}
+
+multi_run:
+  0:
+  8:
+  16:
+  24:
+  32:
+  40:
+  48:
+  56:
+  64:
