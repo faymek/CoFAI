@@ -6,8 +6,8 @@ import glob
 import json
 import torch
 import numpy as np
-from cofai.utils.rfc_utils import mkdir_if_missing
-from cofai.losses.loss_functions import BalancedBinaryCrossEntropyLoss
+from CoFAI.cofai.utils.rfc_utils import mkdir_if_missing
+from CoFAI.cofai.losses.loss_functions import BalancedBinaryCrossEntropyLoss
 # from configs.mypath import PROJECT_ROOT_DIR
 
 class EdgeMeter(object):

@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from omegaconf import OmegaConf
 
-from cofai.engine.run_eval import run_eval
-from cofai.engine.run_eval import write_eval_outputs
+from CoFAI.cofai.engine.run_eval import run_eval
+from CoFAI.cofai.engine.run_eval import write_eval_outputs
 
 
 @dataclass

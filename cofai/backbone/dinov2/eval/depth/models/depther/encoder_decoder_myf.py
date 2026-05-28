@@ -6,8 +6,8 @@
 import torch
 import torch.nn.functional as F
 
-from ...models import builder
-from ...models.builder import DEPTHER
+from .. import builder
+from ..builder import DEPTHER
 from ...ops import resize
 from .base import BaseDepther
 import math

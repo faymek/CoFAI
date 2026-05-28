@@ -1,0 +1,31 @@
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 64
+
+model: 
+  type: Dinov2TimmBypass
+  
+  dino_backbone:
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+    with_registers: true
+    # null keeps the original/full RAE path: run the remaining DINO blocks
+    rae_decode_blocks:
+
+  heads:
+    cls: ${heads.imagenet_cls_base_reg4_last4}
+    # semseg: ${heads.ade20k_seg_base_reg4_last4}
+
+allow_heads:
+  - imagenet_cls_base_reg4_last4
+  - ade20k_seg_base_reg4_last4
+  - voc2012_seg_base_reg4_last4
+  - rae_dinov2_base_reg4_512px
+  - rae_dinov2_base_reg4_vits_512px
+  - rae_dinov2_base_reg4_vitm_512px
+  - rae_dinov2_base_reg4_vitl_512px

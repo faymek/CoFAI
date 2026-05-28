@@ -11,7 +11,7 @@ from typing import List, Optional
 
 import submitit
 
-from dinov2.utils.cluster import (
+from cofai.backbone.dinov2.utils.cluster import (
     get_slurm_executor_parameters,
     get_slurm_partition,
     get_user_checkpoint_path,

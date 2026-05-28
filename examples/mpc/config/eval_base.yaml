@@ -84,6 +84,12 @@ heads:
     layers: 4
     checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_linear4_head.pth
 
+  imagenet_cls_base_reg4_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 768
+    layers: 4
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_reg4_linear4_head.pth
+
   imagenet_cls_large_last4:
     type: Dinov2ClassifierHead
     embed_dim: 1024
@@ -155,6 +161,16 @@ heads:
     num_classes: 21
     patch_size: 16
     checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_voc2012_ms_head.pth
+
+  voc2012_seg_base_reg4_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [768, 768, 768, 768]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 3072
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/MPC/voc2012_seg_base_reg4_last4.pth
 
   voc2012_seg_large_last4:
     type: Dinov2SegmentationHead
@@ -237,6 +253,16 @@ heads:
     patch_size: 16
     checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_ade20k_ms_head.pth
 
+  ade20k_seg_base_reg4_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [768, 768, 768, 768]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 3072
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/MPC/ade20k_seg_base_reg4_last4.pth
+
   ade20k_seg_large_last4:
     type: Dinov2SegmentationHead
     in_channels: [1024, 1024, 1024, 1024]
@@ -256,6 +282,209 @@ heads:
     num_classes: 150
     patch_size: 16
     checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_ade20k_ms_head.pth
+
+  # --------------------------------------------------------------------------
+  # RAE decoder heads (GeneralDecoder: patch tokens -> image)
+  # weights live under ${PROJECT_ROOT}/weights/RAE/
+  # --------------------------------------------------------------------------
+  rae_dinov2_base_reg4_256px:
+    type: cofai.heads.GeneralDecoder
+    decoder_config:
+      decoder_hidden_size: 1152
+      decoder_intermediate_size: 4096
+      decoder_num_attention_heads: 16
+      decoder_num_hidden_layers: 28
+      hidden_act: gelu
+      hidden_dropout_prob: 0.0
+      attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1e-12
+      initializer_range: 0.02
+      num_channels: 3
+      qkv_bias: true
+    patch_size: 16
+    image_size: 256
+    pretrained_path: ${PROJECT_ROOT}/weights/RAE/decoders/dinov2/wReg_base/ViTXL_n08/model.pt
+    normalization_stat_path: ${PROJECT_ROOT}/weights/RAE/stats/dinov2/wReg_base/imagenet1k/stat.pt
+    reshape_to_2d: true
+    eps: 1e-5
+    encoder_img_size: 256
+    encoder_patch_size: 16
+    encoder_hidden_size: 768
+    encoder_mean: [0.485, 0.456, 0.406]
+    encoder_std: [0.229, 0.224, 0.225]
+
+  rae_dinov2_base_reg4_512px:
+    type: cofai.heads.GeneralDecoder
+    decoder_config:
+      decoder_hidden_size: 1152
+      decoder_intermediate_size: 4096
+      decoder_num_attention_heads: 16
+      decoder_num_hidden_layers: 28
+      hidden_act: gelu
+      hidden_dropout_prob: 0.0
+      attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1e-12
+      initializer_range: 0.02
+      num_channels: 3
+      qkv_bias: true
+    patch_size: 16
+    image_size: 512
+    pretrained_path: ${PROJECT_ROOT}/weights/RAE/decoders/dinov2/wReg_base/ViTXL_n08_i512/model.pt
+    normalization_stat_path: ${PROJECT_ROOT}/weights/RAE/stats/dinov2/wReg_base/imagenet1k_512/stat.pt
+    reshape_to_2d: true
+    eps: 1e-5
+    encoder_img_size: 512
+    encoder_patch_size: 16
+    encoder_hidden_size: 768
+    encoder_mean: [0.485, 0.456, 0.406]
+    encoder_std: [0.229, 0.224, 0.225]
+
+  # Smaller randomly trainable RAE decoders for shallow DINO features.
+  # These intentionally omit pretrained_path; use train_rae_decoder.py --init random.
+  rae_dinov2_base_reg4_vits_512px:
+    type: cofai.heads.GeneralDecoder
+    decoder_config:
+      decoder_hidden_size: 384
+      decoder_intermediate_size: 1536
+      decoder_num_attention_heads: 6
+      decoder_num_hidden_layers: 12
+      hidden_act: gelu
+      hidden_dropout_prob: 0.0
+      attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1e-12
+      initializer_range: 0.02
+      num_channels: 3
+      qkv_bias: true
+    patch_size: 16
+    image_size: 512
+    pretrained_path:
+    encoder_img_size: 512
+    encoder_patch_size: 16
+    encoder_hidden_size: 768
+    encoder_mean: [0.485, 0.456, 0.406]
+    encoder_std: [0.229, 0.224, 0.225]
+
+  rae_dinov2_base_reg4_vitm_512px:
+    type: cofai.heads.GeneralDecoder
+    decoder_config:
+      decoder_hidden_size: 768
+      decoder_intermediate_size: 3072
+      decoder_num_attention_heads: 12
+      decoder_num_hidden_layers: 16
+      hidden_act: gelu
+      hidden_dropout_prob: 0.0
+      attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1e-12
+      initializer_range: 0.02
+      num_channels: 3
+      qkv_bias: true
+    patch_size: 16
+    image_size: 512
+    pretrained_path:
+    encoder_img_size: 512
+    encoder_patch_size: 16
+    encoder_hidden_size: 768
+    encoder_mean: [0.485, 0.456, 0.406]
+    encoder_std: [0.229, 0.224, 0.225]
+
+  rae_dinov2_base_reg4_vitl_512px:
+    type: cofai.heads.GeneralDecoder
+    decoder_config:
+      decoder_hidden_size: 1024
+      decoder_intermediate_size: 4096
+      decoder_num_attention_heads: 16
+      decoder_num_hidden_layers: 24
+      hidden_act: gelu
+      hidden_dropout_prob: 0.0
+      attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1e-12
+      initializer_range: 0.02
+      num_channels: 3
+      qkv_bias: true
+    patch_size: 16
+    image_size: 512
+    pretrained_path:
+    encoder_img_size: 512
+    encoder_patch_size: 16
+    encoder_hidden_size: 768
+    encoder_mean: [0.485, 0.456, 0.406]
+    encoder_std: [0.229, 0.224, 0.225]
+
+
+  # RAE Diffusion head for generation (includes decoder + stage2 DiT model)
+  rae_diffusion_dinov2_base_reg4_256px:
+    type: mpcompress.heads.RAEDiffusionHead
+    # RAE decoder config (same as rae_dinov2_base_reg4_256px)
+    decoder_config:
+      decoder_hidden_size: 1152
+      decoder_intermediate_size: 4096
+      decoder_num_attention_heads: 16
+      decoder_num_hidden_layers: 28
+      hidden_act: gelu
+      hidden_dropout_prob: 0.0
+      attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1e-12
+      initializer_range: 0.02
+      num_channels: 3
+      qkv_bias: true
+    patch_size: 16
+    image_size: 256
+    pretrained_decoder_path: ${PROJECT_ROOT}/models/RAE/models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt
+    normalization_stat_path: ${PROJECT_ROOT}/models/RAE/models/stats/dinov2/wReg_base/imagenet1k/stat.pt
+    reshape_to_2d: true
+    eps: 1e-5
+    encoder_img_size: 256
+    encoder_patch_size: 16
+    encoder_hidden_size: 768  # DINOv2-Base
+    encoder_mean: [0.485, 0.456, 0.406]
+    encoder_std: [0.229, 0.224, 0.225]
+    # Stage2 DiT model config
+    stage2_config:
+      target: stage2.models.DDT.DiTwDDTHead
+      params:
+        input_size: 16
+        patch_size: 1
+        in_channels: 768
+        hidden_size: [1152, 2048]
+        depth: [28, 2]
+        num_heads: [16, 16]
+        mlp_ratio: 4.0
+        class_dropout_prob: 0.1
+        num_classes: 1000
+        use_qknorm: false
+        use_swiglu: true
+        use_rope: true
+        use_rmsnorm: true
+        wo_shift: false
+        use_pos_embed: true
+    stage2_ckpt: ${PROJECT_ROOT}/models/RAE/models/DiTs/Dinov2/wReg_base/ImageNet256/DiTDH-XL/stage2_model.pt
+    # Transport config
+    transport_config:
+      params:
+        path_type: Linear
+        prediction: velocity
+        time_dist_type: uniform
+    # Sampler config
+    sampler_config:
+      mode: ODE
+      params:
+        sampling_method: euler
+        num_steps: 50
+        atol: 1e-6
+        rtol: 1e-3
+        reverse: false
+    # Guidance config
+    guidance_config:
+      method: cfg
+      scale: 1.0
+      t-min: 0.0
+      t-max: 1.0
+    # Misc config
+    misc_config:
+      latent_size: [768, 16, 16]  # [C, H, W]
+      num_classes: 1000
+      time_dist_shift_dim: 196608  # 16*16*768
+      time_dist_shift_base: 4096
 
 
 # 评估指标配置
@@ -310,4 +539,4 @@ args:
   verbose: true
   output_dir: ${PROJECT_ROOT}/eval_results
   save_images: true  # 是否保存重建图像
-  save_predictions: true  # 是否保存预测结果 
+  save_predictions: true  # 是否保存预测结果

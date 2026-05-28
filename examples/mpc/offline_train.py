@@ -28,14 +28,14 @@ from torchvision.transforms import (
 )
 
 from compressai.registry import MODELS
-from cofai.models import *
-from cofai.heads import Dinov2ClassifierHead
-from cofai.losses.loss import *
-from cofai.datasets import ImageFolder
-from cofai.utils.utils import setup_logger
-from cofai.utils.tensor_ops import tensor2image
-from cofai.utils.utils import rename_key_by_rules
-from cofai.datasets.feature import (
+from CoFAI.cofai.models import *
+from CoFAI.cofai.heads import Dinov2ClassifierHead
+from CoFAI.cofai.losses.loss import *
+from CoFAI.cofai.datasets import ImageFolder
+from CoFAI.cofai.utils.utils import setup_logger
+from CoFAI.cofai.utils.tensor_ops import tensor2image
+from CoFAI.cofai.utils.utils import rename_key_by_rules
+from CoFAI.cofai.datasets.feature import (
     FeatureDictPerSampleFolder,
     feature_dict_collate_fn,
 )

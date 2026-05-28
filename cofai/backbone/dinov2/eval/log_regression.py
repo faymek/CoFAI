@@ -20,12 +20,12 @@ from torchmetrics import MetricTracker
 
 from dinov2.data import make_dataset
 from dinov2.data.transforms import make_classification_eval_transform
-from dinov2.distributed import get_global_rank, get_global_size
-from dinov2.eval.metrics import MetricType, build_metric
-from dinov2.eval.setup import get_args_parser as get_setup_args_parser
-from dinov2.eval.setup import setup_and_build_model
-from dinov2.eval.utils import evaluate, extract_features
-from dinov2.utils.dtype import as_torch_dtype
+from cofai.backbone.dinov2.distributed import get_global_rank, get_global_size
+from cofai.backbone.dinov2.eval.metrics import MetricType, build_metric
+from cofai.backbone.dinov2.eval.setup import get_args_parser as get_setup_args_parser
+from cofai.backbone.dinov2.eval.setup import setup_and_build_model
+from cofai.backbone.dinov2.eval.utils import evaluate, extract_features
+from cofai.backbone.dinov2.utils.dtype import as_torch_dtype
 
 
 logger = logging.getLogger("dinov2")

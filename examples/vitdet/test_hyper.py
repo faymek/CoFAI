@@ -21,10 +21,10 @@ import types
 import sys
 import json
 from dotenv import load_dotenv
-from cofai.metrics.utils import DictAverageMeter
+from CoFAI.cofai.metrics.utils import DictAverageMeter
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from hyper_token_codec import HyperVitTokenCodec
+from CoFAI.examples.vitdet.hyper_token_codec import HyperVitTokenCodec
 
 load_dotenv()
 

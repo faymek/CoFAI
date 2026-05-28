@@ -39,12 +39,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from cofai.models import MLoREFrameCodec, MLoREVideoCodec
-from cofai.datasets import PASCALContextDataset, NYUDDataset, collate_mlore
-from cofai.transforms import get_mlore_transforms
-from cofai.losses.mlore_loss import MLoRECodingLoss
-from cofai.utils.tensor_ops import center_pad
-from cofai.utils.rfc_utils import center_crop
+from CoFAI.cofai.models import MLoREFrameCodec, MLoREVideoCodec
+from CoFAI.cofai.datasets import PASCALContextDataset, NYUDDataset, collate_mlore
+from CoFAI.cofai.transforms import get_mlore_transforms
+from CoFAI.cofai.losses.mlore_loss import MLoRECodingLoss
+from CoFAI.cofai.utils.tensor_ops import center_pad
+from CoFAI.cofai.utils.rfc_utils import center_crop
 # Disable warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -166,7 +166,7 @@ def instantiate_model(config: Dict, eval_tasks=None, device: str = 'cuda') -> ML
     model_type = config.pop('type')
     
     # 构建配置对象
-    from cofai.backbone.mlore import create_mlore_config
+    from CoFAI.cofai.backbone.mlore import create_mlore_config
     
     tasks_config = config.get('tasks', {})
     # 如果指定了评估任务，使用评估任务列表；否则使用配置中的任务列表
@@ -219,37 +219,37 @@ def get_performance_meter(task: str, p: Dict) -> Any:
     ignore_index = p.get('ignore_index', 255)
 
     if task == 'semseg':
-        from cofai.metrics import SemanticSegmentationMeter
+        from CoFAI.cofai.metrics import SemanticSegmentationMeter
 
         return SemanticSegmentationMeter(database, ignore_idx=ignore_index)
     if task == 'human_parts':
-        from cofai.metrics import HumanPartSegmentationMeter
+        from CoFAI.cofai.metrics import HumanPartSegmentationMeter
 
         return HumanPartSegmentationMeter(database, ignore_idx=ignore_index)
     if task == 'edge':
-        from cofai.metrics import EdgeDetectionMeter
+        from CoFAI.cofai.metrics import EdgeDetectionMeter
 
         edge_w = p.get('edge_w', 0.95)
         return EdgeDetectionMeter(pos_weight=edge_w, ignore_index=ignore_index)
     if task == 'normals':
-        from cofai.metrics import SurfaceNormalsEstimationMeter
+        from CoFAI.cofai.metrics import SurfaceNormalsEstimationMeter
 
         return SurfaceNormalsEstimationMeter(ignore_index=ignore_index)
     if task == 'sal':
-        from cofai.metrics import SaliencyDetectionMeter
+        from CoFAI.cofai.metrics import SaliencyDetectionMeter
 
         return SaliencyDetectionMeter(
             ignore_index=ignore_index, threshold_step=0.05, beta_squared=0.3
         )
     if task == 'depth':
-        from cofai.metrics import DepthEstimationMeter
+        from CoFAI.cofai.metrics import DepthEstimationMeter
 
         tasks_cfg = p.get('TASKS') or {}
         max_depth = tasks_cfg.get('depth_max', 10.0)
         min_depth = tasks_cfg.get('depth_min', 0.001)
         return DepthEstimationMeter(max_depth=max_depth, min_depth=min_depth)
     if task == 'scene':
-        from cofai.metrics import SceneClassificationMeter
+        from CoFAI.cofai.metrics import SceneClassificationMeter
 
         return SceneClassificationMeter(database)
     return None
@@ -370,7 +370,7 @@ def eval_model(cfg: OmegaConf) -> tuple:
     # ===== 保持与原始RFC一致：使用RFC同款 transforms 对 image + labels 一起处理 =====
     # 原始RFC的评估数据是通过 transforms.Normalize + PadImage + AddIgnoreRegions + ToTensor 得到的。
     if 'transform' not in dataset_config or dataset_config.get('transform') is None:
-        from cofai.transforms import get_mlore_transforms
+        from CoFAI.cofai.transforms import get_mlore_transforms
         # 优先使用模型自身的配置（create_mlore_config生成），保证TEST.SCALE一致
         p_for_tf = getattr(model, 'p', None)
         dataset_config['transform'] = get_mlore_transforms(p_for_tf, split='val')
@@ -416,7 +416,7 @@ def eval_model(cfg: OmegaConf) -> tuple:
     # # Optional: RFC-style loss report (edge/bpp/mse) based on raw logits
     report_rfc_loss = bool(getattr(args, "report_rfc_loss", False))
     if report_rfc_loss:
-        from cofai.losses.loss_functions import BalancedBinaryCrossEntropyLoss
+        from CoFAI.cofai.losses.loss_functions import BalancedBinaryCrossEntropyLoss
         ignore_index = int(p_config.get("ignore_index", 255))
         edge_w = float(p_config.get("edge_w", 0.95))
         edge_crit = BalancedBinaryCrossEntropyLoss(pos_weight=edge_w, ignore_index=ignore_index).to(device)

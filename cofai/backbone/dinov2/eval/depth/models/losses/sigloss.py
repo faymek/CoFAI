@@ -6,7 +6,7 @@
 import torch
 import torch.nn as nn
 
-from ...models.builder import LOSSES
+from ..builder import LOSSES
 
 
 @LOSSES.register_module()

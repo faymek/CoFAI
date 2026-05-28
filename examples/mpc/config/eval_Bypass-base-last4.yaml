@@ -1,0 +1,25 @@
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 64
+
+model: 
+  type: Dinov2TimmBypass
+  
+  dino_backbone:
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+    # with_registers: true
+
+  heads:
+    cls: ${heads.imagenet_cls_base_last4}
+    # semseg: ${heads.ade20k_seg_base_reg4_last4}
+
+allow_heads:
+  - imagenet_cls_base_last4
+  - ade20k_seg_base_last4
+  - voc2012_seg_base_last4

@@ -9,10 +9,10 @@ import os
 
 from omegaconf import OmegaConf
 
-import dinov2.distributed as distributed
-from dinov2.logging import setup_logging
-from dinov2.utils import utils
-from dinov2.configs import dinov2_default_config
+import cofai.backbone.dinov2.distributed as distributed
+from cofai.backbone.dinov2.logging import setup_logging
+from cofai.backbone.dinov2.utils import utils
+from cofai.backbone.dinov2.configs import dinov2_default_config
 
 
 logger = logging.getLogger("dinov2")

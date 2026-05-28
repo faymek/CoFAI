@@ -28,26 +28,26 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from cofai.datasets import *
-from cofai.backbone import *
-from cofai.heads import *
-from cofai.models import *
-from cofai.models.cavcodec import *
-from cofai.utils.video_processor import *
-from cofai.metrics import *
-from cofai.backbone import backbone_tools as feature_fns
+from CoFAI.cofai.datasets import *
+from CoFAI.cofai.backbone import *
+from CoFAI.cofai.heads import *
+from CoFAI.cofai.models import *
+from CoFAI.cofai.models.cavcodec import *
+from CoFAI.cofai.utils.video_processor import *
+from CoFAI.cofai.metrics import *
+from CoFAI.cofai.backbone import backbone_tools as feature_fns
 
-from cofai.metrics.iqa_metrics import (
+from CoFAI.cofai.metrics.iqa_metrics import (
     create_img_metrics,
     create_dist_metrics,
     split_img_metrics,
 )
-from cofai.utils.utils import rename_key_by_rules
+from CoFAI.cofai.utils.utils import rename_key_by_rules
 
-from cofai.metrics.utils import DictAverageMeter, DataFrameRecords
-from cofai.utils.debug import extract_shapes
+from CoFAI.cofai.metrics.utils import DictAverageMeter, DataFrameRecords
+from CoFAI.cofai.utils.debug import extract_shapes
 
-from cofai.backbone.vgg import (
+from CoFAI.cofai.backbone.vgg import (
     setup_vgg_feature_extractor,
     extract_vgg_features,
 )

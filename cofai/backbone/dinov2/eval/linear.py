@@ -19,12 +19,12 @@ from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 
 from dinov2.data import SamplerType, make_data_loader, make_dataset
 from dinov2.data.transforms import make_classification_eval_transform, make_classification_train_transform
-import dinov2.distributed as distributed
-from dinov2.eval.metrics import MetricType, build_metric
-from dinov2.eval.setup import get_args_parser as get_setup_args_parser
-from dinov2.eval.setup import setup_and_build_model
-from dinov2.eval.utils import ModelWithIntermediateLayers, evaluate
-from dinov2.logging import MetricLogger
+import cofai.backbone.dinov2.distributed as distributed
+from cofai.backbone.dinov2.eval.metrics import MetricType, build_metric
+from cofai.backbone.dinov2.eval.setup import get_args_parser as get_setup_args_parser
+from cofai.backbone.dinov2.eval.setup import setup_and_build_model
+from cofai.backbone.dinov2.eval.utils import ModelWithIntermediateLayers, evaluate
+from cofai.backbone.dinov2.logging import MetricLogger
 
 
 logger = logging.getLogger("dinov2")

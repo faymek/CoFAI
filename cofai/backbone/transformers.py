@@ -54,15 +54,8 @@ class BackboneProtocol(Protocol):
         """
         ...
     
-    def decode_rae(self, h: torch.Tensor) -> torch.Tensor:
-        """Decode encoded features for RAE decoder input.
-        
-        Args:
-            h: Encoded features from encode method, shape (B, N, C)
-            
-        Returns:
-            Patch tokens of shape (B, N_patches, C), without prefix tokens
-        """
+    def decode(self, h: torch.Tensor, tasks: list[str]) -> dict[str, torch.Tensor]:
+        """Decode encoded features for downstream tasks (task set is backbone-specific)."""
         ...
 
 
@@ -150,26 +143,6 @@ class MAETransformersBackbone(nn.Module):
         h = outputs.last_hidden_state
         
         return h
-    
-    def decode_rae(self, h: torch.Tensor) -> torch.Tensor:
-        """Decode encoded features for RAE decoder input.
-        
-        This method returns patch tokens without cls token.
-        Note: ViTMAE's forward method already applies layernorm to last_hidden_state,
-        so we don't need to apply it again here (matching MAEwNorm behavior).
-        
-        Args:
-            h (torch.Tensor): Encoded features from the encode method, shape (B, N, C).
-        
-        Returns:
-            z (torch.Tensor): Patch tokens of shape (B, N_patches, C), without cls token.
-        """
-        # ViTMAE's last_hidden_state already has layernorm applied (without learnable params)
-        # Just remove cls token (first token) and return patch tokens
-        # This matches MAEwNorm.forward() behavior
-        z = h[:, 1:]  # (B, N_patches, C)
-        
-        return z
 
 
 class SigLIP2TransformersBackbone(nn.Module):
@@ -241,28 +214,6 @@ class SigLIP2TransformersBackbone(nn.Module):
         h = outputs.last_hidden_state
         
         return h
-    
-    def decode_rae(self, h: torch.Tensor) -> torch.Tensor:
-        """Decode encoded features for RAE decoder input.
-        
-        Note: In transformers library, SiglipVisionModel's forward method already applies
-        post_layernorm to last_hidden_state, so we don't need to apply it again here.
-        This matches the old SigLIP2wNorm.forward() behavior which directly returns
-        outputs.last_hidden_state.
-        
-        Args:
-            h (torch.Tensor): Encoded features from the encode method, shape (B, N, C).
-                            This is already the last_hidden_state with post_layernorm applied.
-        
-        Returns:
-            z (torch.Tensor): Patch tokens of shape (B, N_patches, C).
-        """
-        # SigLIP2's last_hidden_state already has post_layernorm applied
-        # (post_layernorm without affine parameters, already set in __init__)
-        # SigLIP2 doesn't have cls token, so return all tokens
-        z = h  # (B, N_patches, C)
-        
-        return z
 
 
 class Dinov2TransformersBackbone(nn.Module):
@@ -371,45 +322,4 @@ class Dinov2TransformersBackbone(nn.Module):
         
         return h
 
-    def decode_rae(self, h: torch.Tensor) -> torch.Tensor:
-        """Decode encoded features for RAE decoder input.
-        
-        This method processes encoded features through the remaining transformer blocks
-        and returns patch tokens without prefix tokens for RAE decoder.
-        
-        Args:
-            h (torch.Tensor): Encoded features from the encode method, shape (B, N, C).
-        
-        Returns:
-            z (torch.Tensor): Patch tokens of shape (B, N_patches, C), without prefix tokens.
-        """
-        # Process through remaining blocks
-        # If slot=-1, all blocks were processed in encode, so just apply layernorm
-        total_blocks = len(self.model.encoder.layer)
-        if self.slot == -1:
-            # All blocks already processed in encode, just apply layernorm
-            hidden_states = h
-        else:
-            if self.slot < 0:
-                slot_idx = total_blocks + self.slot
-            else:
-                slot_idx = self.slot
-            
-            hidden_states = h
-            for i, layer in enumerate(self.model.encoder.layer[slot_idx:]):
-                layer_outputs = layer(hidden_states)
-                hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
-        
-        # Apply final layernorm
-        hidden_states = self.model.layernorm(hidden_states)
-        
-        # Remove cls token and register tokens if exist
-        # DINOv2 has cls token at position 0, and possibly register tokens
-        num_prefix_tokens = 1  # cls token
-        if hasattr(self.model.config, 'num_register_tokens'):
-            num_prefix_tokens += self.model.config.num_register_tokens
-        
-        z = hidden_states[:, num_prefix_tokens:]  # (B, N_patches, C)
-        
-        return z
 

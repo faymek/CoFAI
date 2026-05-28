@@ -8,8 +8,8 @@ from typing import Any, Callable
 import pytest
 import torch
 
-from cofai.engine.dataloader import collate_fn
-from cofai.engine.evaluator import MultiTaskEvaluator, TaskConfig
+from CoFAI.cofai.engine.dataloader import collate_fn
+from CoFAI.cofai.engine.evaluator import MultiTaskEvaluator, TaskConfig
 
 
 def run_step_loop(
@@ -81,7 +81,7 @@ def test_multi_task_evaluator_update_consumes_pred_gt_only():
             return {"x": 1.0}
 
     tm = MultiTaskEvaluator([TaskConfig(label="edge", meter=_DummyMeter())])
-    from cofai.engine.schema import StepOutput
+    from CoFAI.cofai.engine.schema import StepOutput
 
     tm.update(StepOutput(pred={"edge": 1}, gt={"edge": 2}))
     assert meter_called["ok"]
@@ -89,7 +89,7 @@ def test_multi_task_evaluator_update_consumes_pred_gt_only():
 
 def test_stepoutput_records_schema_smoke_mlore_like():
     # Contract: per_sample_records should carry DINO-like common keys.
-    from cofai.engine.schema import StepOutput
+    from CoFAI.cofai.engine.schema import StepOutput
 
     so = StepOutput(
         timing={"enc_time": 1.0, "dec_time": 2.0},
@@ -111,7 +111,7 @@ def test_stepoutput_records_schema_smoke_mlore_like():
 
 
 def test_record_bpp_requires_ori_size():
-    from cofai.engine.run_eval import _build_per_sample_records
+    from CoFAI.cofai.engine.run_eval import _build_per_sample_records
 
     with pytest.raises(KeyError):
         _build_per_sample_records(
@@ -123,7 +123,7 @@ def test_record_bpp_requires_ori_size():
 
 
 def test_record_bpp_fields_derived_from_bits_contract():
-    from cofai.engine.run_eval import _build_per_sample_records
+    from CoFAI.cofai.engine.run_eval import _build_per_sample_records
 
     records = _build_per_sample_records(
         samples=[{"meta": {"img_name": "x", "ori_size": (10, 10)}}],

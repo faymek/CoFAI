@@ -401,6 +401,7 @@ def eval_model(cfg):
     heads_mod = getattr(model, "heads", None)
     has_cls = heads_mod is not None and "cls" in heads_mod
     has_semseg = heads_mod is not None and "semseg" in heads_mod
+    has_rae = heads_mod is not None and ("rec" in heads_mod or "rae" in heads_mod)
 
     task_specs = OmegaConf.select(cfg, "task_specs", default=None)
     if task_specs is not None:
@@ -423,7 +424,16 @@ def eval_model(cfg):
             )
         tasks.append("semseg")
     if cfg.args.recon != 0:
-        tasks.append("rec" + str(cfg.args.recon))
+        if cfg.args.head and "rae" in cfg.args.head:
+            # RAE path: decode_rae() → GeneralDecoder → reconstructed image
+            if not has_rae:
+                raise KeyError(
+                    "RAE reconstruction requires ``model.heads.rec`` (or ``model.heads.rae``). "
+                    "Set ``--head rae_<name>`` so the head is injected into model.heads.rec."
+                )
+            tasks.append("rae")
+        else:
+            tasks.append("rec" + str(cfg.args.recon))
 
     metric_meter = DictAverageMeter()
     records = []
@@ -436,10 +446,10 @@ def eval_model(cfg):
     cls_metric = None
     seg_metric = None
 
-    if head_config and "cls" in preset_name:
+    if head_config and "cls" in tasks:
         cls_metric = instantiate_class(metric_config)
         print("Classification: ``task_feats['cls']`` from ``model.heads.cls`` (same as engine).")
-    elif head_config and "seg" in preset_name:
+    elif head_config and "semseg" in tasks:
         seg_metric = instantiate_class(metric_config)
         print("Segmentation: ``task_feats['semseg']`` from ``model.heads.semseg`` (same as engine).")
 
@@ -448,8 +458,15 @@ def eval_model(cfg):
     img_metrics_dict = {}
     dist_metrics_dict = {}
     if cfg.args.recon != 0:
-        img_metrics_dict = create_img_metrics()
-        dist_metrics_dict = create_dist_metrics()
+        # img_metrics_dict = create_img_metrics()
+        # dist_metrics_dict = create_dist_metrics()
+        
+        # RAE/MPC reconstruction passes tensors (x_hat, x_orig) here, so only
+        # enable full-reference tensor metrics. Directory-level metrics such as
+        # detection mAP/FID require saved image/label folders and are not valid
+        # for this per-sample call site.
+        img_metrics_dict = create_img_metrics(["PSNR", "MS-SSIM", "LPIPS-Alex"])
+
 
     # Output dirs
     if cfg.args.output_dir:
@@ -478,6 +495,9 @@ def eval_model(cfg):
         x_orig = x.clone()
 
         reso_transform: ResolutionTransform = instantiate_class(cfg.resolution_transform)
+        if "rae" in tasks and reso_transform.mode == "center_pad":
+            rae_pad_multiple = int(getattr(model.dino, "patch_size", 16)) * 8
+            reso_transform.size = max(int(reso_transform.size), rae_pad_multiple)
         x_adapt = reso_transform.adapt(x_orig)
         if hasattr(model, "use_yuv") and model.use_yuv:
             x_adapt = rgb2ycbcr(x_adapt)
@@ -522,9 +542,10 @@ def eval_model(cfg):
         # Image quality metrics
         iqa_result = {}
         if cfg.args.recon != 0:
-            if "x_hat" in out_net:
+            if "rae" in out_net:
+                x_hat = out_net["rae"].clamp(0, 1)
+            elif "x_hat" in out_net:
                 x_hat = out_net["x_hat"]
-                # x_hat = x_hat.clamp(0, 1)
             else:
                 x_hat = out_net["rec2" if cfg.args.recon == 2 else "rec1"]
                 x_hat = x_hat.clamp(0, 1)
@@ -639,12 +660,23 @@ def apply_cli_head_overrides(config) -> None:
     k = config.args.head
     if not k:
         return
+    if k not in config.heads:
+        available = sorted(list(config.heads.keys()))
+        raise KeyError(
+            f"Head {k!r} not found in config.heads. Available heads: {available}"
+        )
     if "cls" in k:
         config.model.heads.cls = OmegaConf.create(
             OmegaConf.to_container(config.heads[k], resolve=True)
         )
     if "seg" in k:
         config.model.heads.semseg = OmegaConf.create(
+            OmegaConf.to_container(config.heads[k], resolve=True)
+        )
+    if "rae" in k:
+        # Inject as model.heads.rec so MPC_I2.forward_test picks it up via
+        # head_key = "rec" if "rec" in self.heads else "rae"
+        config.model.heads.rec = OmegaConf.create(
             OmegaConf.to_container(config.heads[k], resolve=True)
         )
 

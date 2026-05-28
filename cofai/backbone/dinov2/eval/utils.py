@@ -11,8 +11,8 @@ from torch import nn
 from torchmetrics import MetricCollection
 
 from dinov2.data import DatasetWithEnumeratedTargets, SamplerType, make_data_loader
-import dinov2.distributed as distributed
-from dinov2.logging import MetricLogger
+import cofai.backbone.dinov2.distributed as distributed
+from cofai.backbone.dinov2.logging import MetricLogger
 
 
 logger = logging.getLogger("dinov2")

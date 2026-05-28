@@ -19,21 +19,21 @@ import tqdm
 import math
 import warnings
 
-from cofai.datasets import *
-from cofai.backbone import *
-from cofai.heads import *
-from cofai.models import *
-from cofai.metrics import *
-from cofai.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
-from cofai.utils.tensor_ops import tensor2image, center_pad, center_crop
-from cofai.utils.utils import rename_key_by_rules
-from cofai.utils.transforms import rgb2ycbcr, ycbcr2rgb
-from cofai.models.dcvcrt.video import DCVC_RT_Video
-from cofai.datasets.video import VideoFolder
+from CoFAI.cofai.datasets import *
+from CoFAI.cofai.backbone import *
+from CoFAI.cofai.heads import *
+from CoFAI.cofai.models import *
+from CoFAI.cofai.metrics import *
+from CoFAI.cofai.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
+from CoFAI.cofai.utils.tensor_ops import tensor2image, center_pad, center_crop
+from CoFAI.cofai.utils.utils import rename_key_by_rules
+from CoFAI.cofai.utils.transforms import rgb2ycbcr, ycbcr2rgb
+from CoFAI.cofai.models.dcvcrt.video import DCVC_RT_Video
+from CoFAI.cofai.datasets.video import VideoFolder
 
 
-from cofai.metrics.utils import DictAverageMeter, DataFrameRecords
-from cofai.utils.debug import extract_shapes
+from CoFAI.cofai.metrics.utils import DictAverageMeter, DataFrameRecords
+from CoFAI.cofai.utils.debug import extract_shapes
 
 
 # Disable Warnings

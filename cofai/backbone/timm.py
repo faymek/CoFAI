@@ -75,6 +75,7 @@ class Dinov2TimmBackbone(nn.Module):
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         cast_dtype: str = "float",  # Data type for autocast, supports string configuration
         with_registers: bool = False,
+        rae_decode_blocks: int | None = None,
     ):
         super().__init__()
         self.n_last_blocks = n_last_blocks
@@ -90,6 +91,7 @@ class Dinov2TimmBackbone(nn.Module):
         self.device_type = self.device.split(":")[0]
         self.cast_dtype = parse_dtype(cast_dtype)
         self.with_registers = with_registers
+        self.rae_decode_blocks = rae_decode_blocks
         self.model = self.load_timm_model()
         self.input_transform = transforms.Compose(
             [
@@ -320,22 +322,42 @@ class Dinov2TimmBackbone(nn.Module):
     def decode_rae(self, h, token_res=None):
         """Decode encoded features for RAE decoder input.
 
-        This method processes encoded features through the remaining transformer blocks
-        and returns patch tokens without prefix tokens for RAE decoder.
+        By default this method follows the original MPCompress behavior: process the
+        encoded features through the remaining transformer blocks and return final
+        patch tokens. If ``rae_decode_blocks`` is configured, it instead runs exactly
+        that many blocks after ``slot``; ``0`` means using the encoder output directly.
+
+        It returns patch tokens without prefix tokens for RAE decoder.
         The input h should be the output from the encode method (after blocks[:slot]).
 
         This method uses LayerNorm without learnable affine parameters (matching
         Dinov2TimmwithNorm with normalize=True). This equals to simple normalization.
         """
-        multi_outputs = self._decode(
-            h,
-            slot=self.slot,
-            n=1,  # Take only the last layer
-            norm=False,
-            return_format="[patch]",
-            token_res=token_res,
-        )
-        out: torch.Tensor = multi_outputs[0]
+        if self.rae_decode_blocks is None:
+            multi_outputs = self._decode(
+                h,
+                slot=self.slot,
+                n=1,  # Take only the last layer
+                norm=False,
+                return_format="[patch]",
+                token_res=token_res,
+            )
+            out: torch.Tensor = multi_outputs[0]
+        else:
+            if self.rae_decode_blocks < 0:
+                raise ValueError("rae_decode_blocks must be >= 0 when configured.")
+            if self.rae_decode_blocks == 0:
+                out = h
+            else:
+                out = self._decode_latter_blocks(
+                    h,
+                    slot=self.slot,
+                    n_blocks=self.rae_decode_blocks,
+                    norm=False,
+                    token_res=token_res,
+                )
+            out = out[:, self.model.num_prefix_tokens :]
+
         mean = out.mean(dim=-1, keepdim=True)
         var = out.var(dim=-1, keepdim=True, unbiased=False)
         out = (out - mean) / torch.sqrt(var + self.model.norm.eps)
@@ -476,37 +498,6 @@ class MAETimmBackbone(nn.Module):
 
         return h
 
-    def decode_rae(self, h: torch.Tensor) -> torch.Tensor:
-        """Decode encoded features for RAE decoder input.
-
-        For RAE, we need to use LayerNorm without learnable affine parameters
-        (matching the behavior of DINOv2's decode_rae for RAE compatibility).
-
-        Args:
-            h (torch.Tensor): Encoded features from the encode method, shape (B, N, C).
-
-        Returns:
-            z (torch.Tensor): Patch tokens of shape (B, N_patches, C), without cls token.
-        """
-        # Apply final norm without learnable affine parameters (for RAE compatibility)
-        with torch.autocast(device_type=self.device_type, dtype=self.cast_dtype):
-            # Manual layer norm without affine parameters (like DINOv2 decode_rae)
-            eps = getattr(self.model.norm, "eps", 1e-6)
-            mean = h.mean(dim=-1, keepdim=True)
-            var = h.var(dim=-1, keepdim=True, unbiased=False)
-            h = (h - mean) / torch.sqrt(var + eps)
-
-            # Remove cls token if exists
-            if (
-                hasattr(self.model, "num_prefix_tokens")
-                and self.model.num_prefix_tokens > 0
-            ):
-                z = h[:, self.model.num_prefix_tokens :]
-            else:
-                z = h[:, 1:] if h.shape[1] > 1 else h
-
-        return z
-
 
 class SigLIP2TimmBackbone(nn.Module):
     """
@@ -621,22 +612,3 @@ class SigLIP2TimmBackbone(nn.Module):
 
         return h
 
-    def decode_rae(self, h: torch.Tensor) -> torch.Tensor:
-        """Decode encoded features for RAE decoder input.
-
-        Note: The encode() method already applies the final norm (without affine parameters),
-        matching the behavior of transformers SiglipVisionModel which applies post_layernorm
-        to last_hidden_state. So we don't need to apply it again here.
-
-        Args:
-            h (torch.Tensor): Encoded features from the encode method, shape (B, N, C).
-                            This is already the output with final norm applied.
-
-        Returns:
-            z (torch.Tensor): Patch tokens of shape (B, N_patches, C).
-        """
-        # SigLIP2's encode() already applies final norm (without affine parameters)
-        # SigLIP2 doesn't have cls token, so return all tokens
-        z = h  # (B, N_patches, C)
-
-        return z
