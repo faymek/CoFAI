@@ -8,10 +8,7 @@
 /models/
 /logs/
 /runs/
-/eval_results/
-/outputs/
-/results/
-/scripts/
+
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
