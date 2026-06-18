@@ -1,0 +1,124 @@
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+exp:
+  name: MPC3-v3-large-vbr
+  quality: "1.0"
+
+model: 
+  type: mpcompress.models.MPC_I3
+  
+  dino_backbone:
+    type: mpcompress.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -1
+    n_last_blocks: 1
+    pretrained: false
+    ckpt_path: /remote-home/wzl/MPCompress/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+
+  dino_codec:
+    type: mpcompress.latent_codecs.vit_feature_codec.VbrVitSeparateLatentCodec
+    h_dim: 1024
+    y_dim: 120
+    z_dim: 48
+    groups: 24
+
+load:
+  path: ${PROJECT_ROOT}/weights/mpc/mpc3-large0.3.pth.tar
+  strict: false
+  rules: # type, pattern, replacement
+    - ["startswith", "dino.model", "useless"]
+
+tune:
+  logic: "chain" # "and", "or", "chain", default is "and"
+  main_optimizer:
+    - "! *.quantiles"
+    - "! dino.*"
+    - "! vqgan.*"
+
+  aux_optimizer:
+    - "! *"
+    - "+ *.quantiles"
+
+qp_lambda:
+  lambda_type: log
+  lambda_range: [0.008, 0.06]
+  num_qps: 65
+  train_qp_range: [0, 64]
+  val_qp_list: [0, 16, 32, 48, 64]
+
+vbr_criterion:
+  rate_name: bpp
+  metric_name: dino
+  metric_higher_is_better: false
+  anchor_results: # if no anchor results, use first epoch as anchor
+    # - {loss: 2.140, bpp: 0.808, psnr: 37.4670}
+    # - {loss: 1.139, bpp: 0.573, psnr: 35.9233}
+
+misc:
+  epochs: 20
+  # Per-GPU batch size. With torchrun --nproc_per_node=4, global batch size is 16.
+  batch_size: 4
+  test_batch_size: 1
+  # Per-process dataloader workers. 4 GPUs => 16 workers total.
+  num_workers: 4
+  clip_max_norm: 1.0
+  check: false
+  visual: false
+  resume: false
+  test_subset_ratio: 0.2
+
+main_scheduler:
+  type: torch.optim.lr_scheduler.StepLR
+  step_size: 15
+  gamma: 0.1
+
+train_dataset:
+  type: mpcompress.datasets.ImageFolder
+  root: /remote-home/wzl/dataset/imagenet
+  # root: /remote-home/wzl/MPCompress/data/mini_ImageNet
+  split: train
+
+val_dataset:
+  type: mpcompress.datasets.ImageFolder
+  root: /remote-home/wzl/dataset/imagenet
+  # root: /remote-home/wzl/MPCompress/data/mini_ImageNet
+  split: val
+
+train_transforms:
+  type: torchvision.transforms.Compose
+  transforms:
+    - type: torchvision.transforms.RandomCrop
+      size: 512
+      pad_if_needed: true
+    - type: torchvision.transforms.ToTensor
+
+val_transforms:
+  type: torchvision.transforms.Compose
+  transforms:
+    - type: torchvision.transforms.CenterCrop
+      size: 512
+    - type: torchvision.transforms.ToTensor
+
+criterion:
+  type: mpcompress.losses.MPC2Loss
+  rlmbda: 0.01
+  num_prefix_tokens: 5
+
+main_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-4
+
+aux_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-3
+
+engine:
+  cuda: true
+  save: true
+  seed: 42
+  deterministic: false
+  cudnn_benchmark: true
+  

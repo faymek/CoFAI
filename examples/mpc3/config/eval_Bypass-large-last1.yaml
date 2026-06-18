@@ -1,0 +1,24 @@
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 16
+
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+model:
+  type: Dinov3TimmBypass
+
+  dino_backbone:
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -1
+    n_last_blocks: 1
+    cast_dtype: float16
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+
+allow_heads:
+  - nyuv2_dep_large_last1
+  - ade20k_seg_large_last1

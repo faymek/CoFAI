@@ -1,0 +1,108 @@
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+exp:
+  name: MPC3-v3-large-train-20260527-smally-patchloss
+  quality: "1.0"
+
+model: 
+  type: mpcompress.models.MPC_I3
+  
+  dino_backbone:
+    type: mpcompress.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -1
+    n_last_blocks: 1
+    pretrained: false
+    ckpt_path: /remote-home/wzl/MPCompress/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+
+  dino_codec:
+    type: mpcompress.latent_codecs.vit_feature_codec.VitSeparateLatentCodec
+    h_dim: 1024
+    y_dim: 120  #192
+    z_dim: 48   #64
+    groups: 24
+    num_prefix_tokens: 5
+
+load:
+  path:
+  strict: false
+  rules: # type, pattern, replacement
+    - ["startswith", "dino.model", "useless"]
+
+tune:
+  logic: "chain" # "and", "or", "chain", default is "and"
+  main_optimizer:
+    - "! *.quantiles"
+    - "! dino.*"
+    - "! vqgan.*"
+
+  aux_optimizer:
+    - "! *"
+    - "+ *.quantiles"
+
+misc:
+  epochs: 30
+  # Per-GPU batch size. With torchrun --nproc_per_node=4, global batch size is 16.
+  batch_size: 4
+  test_batch_size: 1
+  # Per-process dataloader workers. 4 GPUs => 16 workers total.
+  num_workers: 4
+  clip_max_norm: 1.0
+  check: false
+  visual: false
+  resume: false
+  test_subset_ratio: 0.2
+
+main_scheduler:
+  type: torch.optim.lr_scheduler.StepLR
+  step_size: 18
+  gamma: 0.1
+
+train_dataset:
+  type: mpcompress.datasets.ImageFolder
+  root: /remote-home/wzl/dataset/imagenet
+  split: train
+
+val_dataset:
+  type: mpcompress.datasets.ImageFolder
+  root: /remote-home/wzl/dataset/imagenet
+  split: val
+
+train_transforms:
+  type: torchvision.transforms.Compose
+  transforms:
+    - type: torchvision.transforms.RandomCrop
+      size: 512
+      pad_if_needed: true
+    - type: torchvision.transforms.ToTensor
+
+val_transforms:
+  type: torchvision.transforms.Compose
+  transforms:
+    - type: torchvision.transforms.CenterCrop
+      size: 512
+    - type: torchvision.transforms.ToTensor
+
+criterion:
+  type: mpcompress.losses.MPC2Loss
+  rlmbda: 0.05
+  num_prefix_tokens: 5
+
+main_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-4
+
+aux_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-3
+
+engine:
+  cuda: true
+  save: true
+  seed: 42
+  deterministic: false
+  cudnn_benchmark: true
+  
