@@ -244,3 +244,137 @@ class MPC12Loss(nn.Module):
         if "monitor" in output:
             monitor.update(output["monitor"])
         return loss, monitor
+
+class MPC3Loss(nn.Module):
+    """MPC3 loss function combining rate-distortion optimization.
+
+    This loss function combines:
+
+    - Bits per pixel (BPP) loss from likelihoods
+    - PATCH tokens reconstruction loss
+    - CLS token reconstruction loss
+
+    The total loss is: rlmbda * bpp_loss + cls_token_loss + patch_tokens_loss
+    """
+
+    def __init__(
+        self,
+        rlmbda=1.0,
+        num_prefix_tokens=5,
+        likelihood_eps=1e-9,
+    ):
+        """Initialize MPC2Loss.
+
+        Args:
+            rlmbda (float, optional): Rate-distortion trade-off parameter.
+                Higher values emphasize compression rate. Defaults to 1.0.
+        """
+        super().__init__()
+        self.rlmbda = rlmbda
+        self.num_prefix_tokens = int(num_prefix_tokens)
+        self.likelihood_eps = float(likelihood_eps)
+
+    def _resolve_num_prefix_tokens(self, output, override=None):
+        if override is not None:
+            return int(override)
+        if "num_prefix_tokens" in output:
+            return int(output["num_prefix_tokens"])
+        return self.num_prefix_tokens
+
+    def get_rlmbda(self, global_step=None):
+        """Get the rate-distortion trade-off parameter.
+
+        Args:
+            global_step (int, optional): Current training step (currently unused).
+                Can be used for scheduled lambda values in the future.
+
+        Returns:
+            rlmbda (float): The rate-distortion trade-off parameter.
+        """
+        return self.rlmbda
+
+    def forward(
+        self,
+        output,
+        x,
+        x_shape=None,
+        global_step=None,
+        rlmbda=None,
+        lmbda=None,
+        num_prefix_tokens=None,
+    ):
+        """Forward pass to compute MPC2 loss.
+
+        Args:
+            output (dict): Model output dictionary containing:
+
+                - "likelihoods" (dict): Dictionary of likelihood tensors for BPP calculation
+                - "h_dino_hat" (torch.Tensor): Reconstructed DINO features [B, N+1, D]
+                - "h_dino" (torch.Tensor): Target DINO features [B, N+1, D]
+                - "monitor" (dict, optional): Additional monitoring metrics
+            x (torch.Tensor, optional): Input tensor [B, C, H, W].
+                Used to infer shape if x_shape is None.
+            x_shape (tuple, optional): Shape of input tensor (N, C, H, W).
+                Required if x is None.
+            global_step (int, optional): Current training step for lambda scheduling.
+            rlmbda (float, optional): Rate-distortion trade-off parameter.
+        Returns:
+            loss (torch.Tensor): The total loss tensor
+            monitor (dict): Dictionary of monitoring metrics including loss value and additional metrics from output["monitor"] if present
+
+        Raises:
+            ValueError: If both x and x_shape are None.
+        """
+        if x is None and x_shape is None:
+            raise ValueError("x and x_shape cannot be both None")
+        x_shape = x.shape if x is not None else x_shape
+        N, _, H, W = x_shape
+        num_pixels = N * H * W
+
+        bpp_components = {}
+        for name, likelihoods in output["likelihoods"].items():
+            bpp = torch.log(likelihoods.clamp_min(self.likelihood_eps)).sum() / (
+                -math.log(2) * num_pixels
+            )
+            bpp_components[name] = bpp
+        bpp_loss = sum(bpp_components.values())
+
+        h_dino_hat = output["h_dino_hat"].contiguous()
+        h_dino = output["h_dino"].contiguous()
+
+        n_prefix = self._resolve_num_prefix_tokens(output, override=num_prefix_tokens)
+        if n_prefix < 1:
+            raise ValueError(f"num_prefix_tokens must be >= 1, got {n_prefix}")
+        if h_dino_hat.shape[1] <= n_prefix:
+            raise ValueError(
+                f"Token length ({h_dino_hat.shape[1]}) must be > num_prefix_tokens ({n_prefix})."
+            )
+
+        h_dino_loss = F.mse_loss(h_dino_hat[:, n_prefix:, :], h_dino[:, n_prefix:, :])
+        cls_token_loss = F.mse_loss(h_dino_hat[:, :1, :], h_dino[:, :1, :])
+
+        # 优先使用调用时传入的 lambda（兼容 lmbda / rlmbda）
+        if lmbda is not None:
+            rlmbda_eff = float(lmbda)
+        elif rlmbda is not None:
+            rlmbda_eff = float(rlmbda)
+        else:
+            rlmbda_eff = float(self.get_rlmbda(global_step))
+
+        loss = rlmbda_eff * bpp_loss + cls_token_loss + h_dino_loss
+
+        monitor = {
+            "loss": loss.detach().mean().item(),
+            "cls": cls_token_loss.detach().mean().item(),
+            "dino": h_dino_loss.detach().mean().item(),
+            "bpp": bpp_loss.item(),
+            "rlmbda": rlmbda_eff,
+        }
+        monitor.update(
+            {name: bpp.detach().mean().item() for name, bpp in bpp_components.items()}
+        )
+        if "monitor" in output:
+            monitor.update(output["monitor"])
+        return loss, monitor
+
+
