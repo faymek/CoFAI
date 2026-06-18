@@ -1,6 +1,6 @@
 from .base import BackboneProtocol
 from .tokenizer import VqganBackbone
-from .timm import Dinov2TimmBackbone, MAETimmBackbone, SigLIP2TimmBackbone
+from .timm import Dinov2TimmBackbone, MAETimmBackbone, SigLIP2TimmBackbone, Dinov3TimmBackbone
 from .transformers import (
     Dinov2TransformersBackbone,
     MAETransformersBackbone,
@@ -13,6 +13,7 @@ __all__ = [
     "BackboneProtocol",
     "VqganBackbone",
     "Dinov2TimmBackbone",
+    "Dinov3TimmBackbone"
     "MAETimmBackbone",
     "SigLIP2TimmBackbone",
     "Dinov2TransformersBackbone",

@@ -612,3 +612,293 @@ class SigLIP2TimmBackbone(nn.Module):
 
         return h
 
+class Dinov3TimmBackbone(nn.Module):
+    """
+    DINOv3 backbone implemented with timm.
+
+    Key differences vs DINOv2:
+      - DINOv3 always includes register tokens
+      - timm model names are fixed to patch16
+      - model sizes include: large / huge_plus / 7b
+      - qkvb is an explicit model variant
+
+    This class keeps the same encode/decode/slot abstraction as DINOv2 version.
+    """
+
+    def __init__(
+        self,
+        model_size="large",
+        img_size=256,
+        patch_size=16,
+        dynamic_size=False,
+        slot=-4,
+        n_last_blocks=4,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        cast_dtype="float",
+        # ---- DINOv3-specific ----
+        qkvb=False,
+        weights_tag="lvd1689m",
+        return_registers=False,
+        # ---- NEW: offline/local weights ----
+        ckpt_path=None,          
+        pretrained=True,        
+    ):
+        super().__init__()
+
+        assert patch_size == 16, "timm DINOv3 models are patch16 only."
+
+        self.model_size = model_size
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.dynamic_size = dynamic_size
+        self.slot = slot
+        self.n_last_blocks = n_last_blocks
+
+        self.qkvb = qkvb
+        self.weights_tag = weights_tag
+        self.return_registers = return_registers
+
+        self.device = device
+        self.device_type = device.split(":")[0]
+        self.cast_dtype = parse_dtype(cast_dtype)
+
+        self.ckpt_path = ckpt_path
+        self.pretrained = pretrained
+
+        self.model = self.load_timm_model()
+
+        self.input_transform = transforms.Compose(
+            [
+                transforms.Normalize(
+                    mean=[0.4850, 0.4560, 0.4060],
+                    std=[0.2290, 0.2240, 0.2250],
+                )
+            ]
+        )
+
+        self._rope = None
+        self._attn_mask = None
+
+    def load_timm_model(self):
+        model_name = f"vit_{self.model_size}_patch16_dinov3.{self.weights_tag}"
+        # 1) Prefer local checkpoint when provided.
+        if self.ckpt_path is not None:
+            ckpt_path = os.path.expanduser(str(self.ckpt_path))
+            if not os.path.isfile(ckpt_path):
+                raise FileNotFoundError(f"Local checkpoint not found: {ckpt_path}")
+
+            model = timm.create_model(
+                model_name,
+                pretrained=False,
+                checkpoint_path=self.ckpt_path,
+                img_size=self.img_size,
+                patch_size=self.patch_size,
+                drop_path_rate=0.0,
+                dynamic_img_size=self.dynamic_size,
+            )
+            model.eval()
+            return model
+
+        # 2) Otherwise use HF Hub entry in timm.
+        _normalize_hf_endpoint_env()
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+        if getattr(self, "hf_repo_id", None):
+            repo_id = self.hf_repo_id
+        else:
+            size_map = {
+                "small": "vits16",
+                "base": "vitb16",
+                "large": "vitl16",
+                "huge_plus": "vith16plus",
+                "7b": "vit7b16",
+            }
+            if self.model_size not in size_map:
+                raise ValueError(f"Unsupported model_size: {self.model_size}")
+            repo_id = f"facebook/dinov3-{size_map[self.model_size]}-pretrain-{self.weights_tag}"
+
+        hf_model_name = f"hf_hub:{repo_id}"
+
+        model = timm.create_model(
+            hf_model_name,
+            pretrained=self.pretrained,
+            img_size=self.img_size,
+            patch_size=self.patch_size,
+            drop_path_rate=0.0,
+            dynamic_img_size=self.dynamic_size,
+        )
+        model.eval()
+        return model
+
+    def forward(self, x, task="whole"):
+        """
+        task:
+          - "whole": list of full token tensors
+          - "cls":   cls (+ optional reg) + patch tokens
+          - "seg":   patch tokens reshaped to 2D
+        """
+        assert task in ["whole", "cls", "seg"]
+
+        with torch.inference_mode():
+            h = self.encode(x)
+            token_res = (
+                x.size(2) // self.patch_size,
+                x.size(3) // self.patch_size,
+            )
+            return self.decode(h, token_res=token_res, task=task)
+
+    def encode(self, x):
+        dino = self.model
+
+        with torch.autocast(device_type=self.device_type, dtype=self.cast_dtype):
+            x = self.input_transform(x)
+            x = dino.patch_embed(x)
+
+            pos_out = dino._pos_embed(x)
+            rope = None
+            attn_mask = None
+            if isinstance(pos_out, tuple):
+                x = pos_out[0]
+                if len(pos_out) >= 2:
+                    rope = pos_out[1]
+                if len(pos_out) >= 3:
+                    attn_mask = pos_out[2]
+            else:
+                x = pos_out
+
+            # cache for decode()
+            self._rope = rope
+            self._attn_mask = attn_mask
+
+            norm_pre = getattr(dino, "norm_pre", None)
+            if norm_pre is not None:
+                x = norm_pre(x)
+
+            rope_mixed = bool(getattr(dino, "rope_mixed", False))
+            for i, blk in enumerate(dino.blocks[: self.slot]):
+                rope_i = None
+                if self._rope is not None:
+                    rope_i = self._rope[i] if rope_mixed else self._rope
+
+                if rope_i is not None or self._attn_mask is not None:
+                    x = blk(x, rope=rope_i, attn_mask=self._attn_mask)
+                else:
+                    x = blk(x)
+
+        return x
+
+    def decode(self, h, token_res=None, task="whole"):
+        if task == "whole":
+            return self.decode_whole(h, token_res)
+        elif task == "cls":
+            return self.decode_cls(h, token_res)
+        elif task == "seg":
+            return self.decode_seg(h, token_res)
+
+    def _decode(
+        self,
+        x,
+        slot,
+        n,
+        norm=True,
+        return_format="[whole]",
+        token_res=None,
+    ):
+        allow_formats = [
+            "[whole]",
+            "[cls,patch]",
+            "[cls,reg,patch]",
+            "[patch2d]",
+        ]
+        assert return_format in allow_formats
+
+        dino = self.model
+        total_layers = len(dino.blocks)
+
+        if isinstance(n, int):
+            need_layers = range(total_layers - n, total_layers)
+        else:
+            need_layers = n
+
+        if slot is None:
+            curr_layer = total_layers - 1
+        elif slot < 0:
+            curr_layer = total_layers + slot - 1
+        else:
+            curr_layer = slot - 1
+
+        outputs = []
+
+        if curr_layer == min(need_layers):
+            outputs.append(x)
+
+        with torch.autocast(
+            device_type=self.device_type, dtype=self.cast_dtype
+        ):
+            rope_mixed = bool(getattr(dino, "rope_mixed", False))
+            for i in range(curr_layer + 1, total_layers):
+                rope_i = None
+                if self._rope is not None:
+                    rope_i = self._rope[i] if rope_mixed else self._rope
+
+                if rope_i is not None or self._attn_mask is not None:
+                    x = dino.blocks[i](x, rope=rope_i, attn_mask=self._attn_mask)
+                else:
+                    x = dino.blocks[i](x)
+
+                if i in need_layers:
+                    outputs.append(x)
+
+            if norm:
+                outputs = [dino.norm(o) for o in outputs]
+
+        if return_format == "[whole]":
+            return outputs
+
+        cls_tokens = [o[:, 0] for o in outputs]
+        reg_tokens = [o[:, 1 : dino.num_prefix_tokens] for o in outputs]
+        patch_tokens = [o[:, dino.num_prefix_tokens :] for o in outputs]
+
+        if return_format == "[cls,patch]":
+            return tuple(zip(cls_tokens, patch_tokens))
+
+        if return_format == "[cls,reg,patch]":
+            return tuple(zip(cls_tokens, reg_tokens, patch_tokens))
+
+        if return_format == "[patch2d]":
+            h, w = token_res
+            return [
+                rearrange(p, "b (h w) c -> b c h w", h=h, w=w)
+                for p in patch_tokens
+            ]
+
+    def decode_whole(self, h, token_res=None):
+        return self._decode(
+            h,
+            slot=self.slot,
+            n=self.n_last_blocks,
+            norm=True,
+            return_format="[whole]",
+            token_res=token_res,
+        )
+
+    def decode_cls(self, h, token_res=None):
+        return self._decode(
+            h,
+            slot=self.slot,
+            n=self.n_last_blocks,
+            norm=True,
+            return_format=(
+                "[cls,reg,patch]" if self.return_registers else "[cls,patch]"
+            ),
+            token_res=token_res,
+        )
+
+    def decode_seg(self, h, token_res):
+        return self._decode(
+            h,
+            slot=self.slot,
+            n=self.n_last_blocks,
+            norm=True,
+            return_format="[patch2d]",
+            token_res=token_res,
+        )
