@@ -5,7 +5,7 @@ from .semantic_segmentation import SemanticSegmentationMeter
 from .surface_normals_estimation import SurfaceNormalsEstimationMeter
 from .saliency_detection import SaliencyDetectionMeter
 from .human_part_segmentation import HumanPartSegmentationMeter
-from .depth_estimation import DepthEstimationMeter, DepthEstimationMeterLegacy
+from .depth_estimation import DepthEstimationMeter, DepthEstimationMeterLegacy, Dinov3DepthEstimationMeter
 from .scene_classification import SceneClassificationMeter
 from .iqa_metrics import (
     create_img_metrics,
@@ -30,5 +30,6 @@ __all__ = [
     "HumanPartSegmentationMeter",
     "DepthEstimationMeter",
     "DepthEstimationMeterLegacy",
+    "Dinov3DepthEstimationMeter",
     "SceneClassificationMeter",
 ]

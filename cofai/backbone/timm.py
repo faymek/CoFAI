@@ -25,6 +25,8 @@ Available Model Names in timm: https://huggingface.co/timm/collections
 Note: All backbones in this module use only timm library implementations.
 """
 
+import os
+
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -735,8 +737,9 @@ class Dinov3TimmBackbone(nn.Module):
           - "whole": list of full token tensors
           - "cls":   cls (+ optional reg) + patch tokens
           - "seg":   patch tokens reshaped to 2D
+          - "depth": patch tokens reshaped to 2D
         """
-        assert task in ["whole", "cls", "seg"]
+        assert task in ["whole", "cls", "seg", "depth"]
 
         with torch.inference_mode():
             h = self.encode(x)
@@ -793,6 +796,8 @@ class Dinov3TimmBackbone(nn.Module):
             return self.decode_cls(h, token_res)
         elif task == "seg":
             return self.decode_seg(h, token_res)
+        elif task == "depth":
+            return self.decode_depth(h, token_res)
 
     def _decode(
         self,
@@ -894,6 +899,16 @@ class Dinov3TimmBackbone(nn.Module):
         )
 
     def decode_seg(self, h, token_res):
+        return self._decode(
+            h,
+            slot=self.slot,
+            n=self.n_last_blocks,
+            norm=True,
+            return_format="[patch2d]",
+            token_res=token_res,
+        )
+
+    def decode_depth(self, h, token_res):
         return self._decode(
             h,
             slot=self.slot,

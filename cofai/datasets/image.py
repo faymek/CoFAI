@@ -306,3 +306,100 @@ class SegmentationDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         return sample
+
+
+class NYUDepthDataset(Dataset):
+    """NYUD depth dataset adapter for the MPC evaluation script.
+
+    Supports both the RFC/MT layout and the local NYU layout with ``nyu_test.txt``
+    plus ``train``/``test`` folders containing ``rgb_*.jpg`` and
+    ``sync_depth_*.png`` pairs.
+        ├─ NYU/
+│       ├─ train/
+│       └─ test/
+│       ├─ nyu_train.txt/
+│       └─ nyu_test.txt/
+    """
+
+    def __init__(self, root, split="val", split_file=None, download=False, **kwargs):
+        self.root = Path(root)
+        self.dataset = None
+        self.samples = None
+
+        if (self.root / "gt_sets").is_dir() and (self.root / "scene_names.npy").is_file():
+            from cofai.datasets.rfcdata.nyud import NYUD_MT
+
+            self.dataset = NYUD_MT(
+                root=root,
+                split=split,
+                download=download,
+                transform=None,
+                do_depth=True,
+            )
+            return
+
+        split_name = "test" if split in ("val", "test") else split
+        split_path = self.root / split_name
+        list_path = self.root / split_file if split_file else self.root / f"nyu_{split_name}.txt"
+        if not list_path.is_file() and split_file:
+            list_path = self.root / Path(split_file).name
+
+        samples = []
+        if list_path.is_file():
+            with open(list_path, "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) < 2:
+                        continue
+                    img_rel, depth_rel = parts[0], parts[1]
+                    img_path = split_path / img_rel
+                    depth_path = split_path / depth_rel
+                    if not img_path.is_file():
+                        img_path = self.root / img_rel
+                    if not depth_path.is_file():
+                        depth_path = self.root / depth_rel
+                    samples.append((img_path, depth_path))
+        elif split_path.is_dir():
+            for img_path in sorted(split_path.rglob("rgb_*.jpg")):
+                depth_path = img_path.with_name(img_path.name.replace("rgb_", "sync_depth_").replace(".jpg", ".png"))
+                if depth_path.is_file():
+                    samples.append((img_path, depth_path))
+        else:
+            raise FileNotFoundError(
+                f"Cannot find NYU split file or directory under {self.root}: "
+                f"{list_path} / {split_path}"
+            )
+
+        if not samples:
+            raise RuntimeError(f"No NYU RGB-depth pairs found under {self.root}")
+        self.samples = samples
+
+    def __len__(self):
+        return len(self.dataset) if self.dataset is not None else len(self.samples)
+
+    def __getitem__(self, index):
+        if self.dataset is not None:
+            sample = self.dataset[index]
+            image_np = sample["image"]
+            if image_np.dtype != np.uint8:
+                image_np = np.clip(image_np, 0, 255).astype(np.uint8)
+            image = Image.fromarray(image_np).convert("RGB")
+            depth = sample["depth"]
+            if depth.ndim == 3 and depth.shape[-1] == 1:
+                depth = depth[..., 0]
+            meta = sample.get("meta", {})
+            img_name = meta.get("img_name", str(index))
+            img_path = str(self.dataset.images[index])
+        else:
+            img_path_obj, depth_path = self.samples[index]
+            image = Image.open(img_path_obj).convert("RGB")
+            depth = np.array(Image.open(depth_path), dtype=np.float32)
+            img_name = img_path_obj.stem
+            img_path = str(img_path_obj)
+
+        return image, {
+            "img_path": img_path,
+            "img_name": img_name,
+            "ori_size": image.size,
+            "depth_label": depth.astype(np.float32, copy=False),
+        }

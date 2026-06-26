@@ -1205,6 +1205,8 @@ class MPC_I3(CompressionModel):
                 task_feats["cls"] = self.dino.decode_cls(h_dino_hat)
             if "seg" in tasks:
                 task_feats["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
+            if "depth" in tasks:
+                task_feats["depth"] = self.dino.decode_depth(h_dino_hat, token_res)
 
             return coded_unit, task_feats
 
@@ -1253,4 +1255,6 @@ class MPC_I3(CompressionModel):
             task_feats["cls"] = self.dino.decode_cls(h_hat)
         if "seg" in tasks:
             task_feats["seg"] = self.dino.decode_seg(h_hat, token_res)
+        if "depth" in tasks:
+            task_feats["depth"] = self.dino.decode_depth(h_hat, token_res)
         return task_feats
