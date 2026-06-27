@@ -28,14 +28,14 @@ from torchvision.transforms import (
 )
 
 from compressai.registry import MODELS
-from mpcompress.models import *
-from mpcompress.heads import Dinov2ClassifierHead
-from mpcompress.losses.loss import *
-from mpcompress.datasets import ImageFolder
-from mpcompress.utils.utils import setup_logger
-from mpcompress.utils.tensor_ops import tensor2image
-from mpcompress.utils.utils import rename_key_by_rules
-from mpcompress.datasets.feature import (
+from cofai.models import *
+from cofai.heads import Dinov2ClassifierHead
+from cofai.losses.loss import *
+from cofai.datasets import ImageFolder
+from cofai.utils.utils import setup_logger
+from cofai.utils.tensor_ops import tensor2image
+from cofai.utils.utils import rename_key_by_rules
+from cofai.datasets.feature import (
     FeatureDictPerSampleFolder,
     feature_dict_collate_fn,
 )

@@ -23,24 +23,24 @@ import torch.nn.functional as F
 from torchvision import transforms
 from torchvision.transforms import ToPILImage, ToTensor
 
-from mpcompress.datasets import *
-from mpcompress.backbone import *
-from mpcompress.heads import *
-from mpcompress.models import *
-from mpcompress.metrics import *
-from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
-from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
-from mpcompress.utils.utils import rename_key_by_rules
-from mpcompress.utils.transforms import rgb2ycbcr, ycbcr2rgb
-from mpcompress.utils.debug import tensor_hash
-from mpcompress.backbone.dinov3.eval.depth.metrics import DEPTH_METRICS, calculate_depth_metrics
-from mpcompress.backbone.dinov3.eval.depth.datasets.datasets_utils import _EvalCropType, make_valid_mask
+from cofai.datasets import *
+from cofai.backbone import *
+from cofai.heads import *
+from cofai.models import *
+from cofai.metrics import *
+from cofai.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
+from cofai.utils.tensor_ops import tensor2image, center_pad, center_crop
+from cofai.utils.utils import rename_key_by_rules
+from cofai.utils.transforms import rgb2ycbcr, ycbcr2rgb
+from cofai.utils.debug import tensor_hash
+from cofai.backbone.dinov3.eval.depth.metrics import DEPTH_METRICS, calculate_depth_metrics
+from cofai.backbone.dinov3.eval.depth.datasets.datasets_utils import _EvalCropType, make_valid_mask
 import matplotlib.pyplot as plt
 
 from dotenv import load_dotenv
 load_dotenv()
 
-# from mpcompress.utils.debug import extract_shapes
+# from cofai.utils.debug import extract_shapes
 try:
     from fvcore.nn import FlopCountAnalysis, parameter_count_table
 

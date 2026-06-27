@@ -19,11 +19,11 @@ from torchvision.transforms import (
     RandomCrop,
 )
 
-from mpcompress.datasets import *
-from mpcompress.heads import *
-from mpcompress.models import *
-from mpcompress.metrics import *
-from mpcompress.utils.debug import extract_shapes, tensor_hash
+from cofai.datasets import *
+from cofai.heads import *
+from cofai.models import *
+from cofai.metrics import *
+from cofai.utils.debug import extract_shapes, tensor_hash
 from dotenv import load_dotenv
 
 load_dotenv()
