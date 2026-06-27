@@ -17,7 +17,7 @@ resolution_transform:
   size: 64
 
 model: 
-  type: MPC_I3
+  type: DinoFeatureCodecModel
   
   dino_backbone:
     type: cofai.backbone.Dinov3TimmBackbone
@@ -36,7 +36,7 @@ model:
     y_dim: 120
     z_dim: 48
     groups: 24
-    prefix_tokens: 5
+    num_prefix_tokens: 5
 
 allow_heads:
   - ade20k_seg_large_last1

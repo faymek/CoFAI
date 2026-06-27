@@ -19,7 +19,7 @@ resolution_transform:
   size: 64
 
 model: 
-  type: MPC_I3
+  type: DinoFeatureCodecModel
   
   dino_backbone:
     type: cofai.backbone.Dinov3TimmBackbone
@@ -27,7 +27,7 @@ model:
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: 24
+    slot: -1
     n_last_blocks: 1
     pretrained: false
     ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
@@ -38,7 +38,7 @@ model:
     y_dim: 120
     z_dim: 48
     groups: 24
-    prefix_tokens: 5
+    num_prefix_tokens: 5
 
 allow_heads:
   - ade20k_seg_large_last1
