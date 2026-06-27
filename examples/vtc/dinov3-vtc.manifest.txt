@@ -1,0 +1,25 @@
+# VTC / DINOv3 预训练权重清单 (cofai-download manifest)
+#
+# 格式: <目标相对路径>  [URL]  [sha256:..]
+# 目标路径相对仓库根目录 (PROJECT_ROOT)。
+# 省略 URL 时, 默认从 https://medialab.sjtu.edu.cn/files/CoFAI-share/<目标相对路径> 下载,
+# sha256 允许只写前缀(如 8 位 sha256:95253fe4), 以缩短清单。
+#
+# 用法:
+#   # 下载缺失/损坏的权重并校验
+#   poetry run cofai-download examples/vtc/dinov3-vtc.manifest.txt
+
+# Dataset package
+data/ADE20K.zip  sha256:95253fe4
+data/NYU_subset_for_training_depth_head.zip  sha256:0762c3ea
+
+# --- DINOv3-Large backbone ---
+weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors  sha256:45172f20
+
+# --- 任务头 ---
+weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth  sha256:98cd2ec1
+weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth  sha256:e8931641
+
+# --- VTC 编解码器权重 ---
+weights/VTC/dinov3-vitl16-slot-1--VTC.pth.tar  sha256:0585e23d
+weights/VTC/dinov3-vitl16-slot-1--VTC-vbr.pth.tar  sha256:e7322ae3
