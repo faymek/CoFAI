@@ -105,6 +105,7 @@ addopts = "-v --tb=short"
 
 [tool.poetry.scripts]
 cofai-eval = "cofai.engine.run_eval:main"
+cofai-download = "cofai.utils.download:main"
 
 [build-system]
 requires = ["poetry-core"]
