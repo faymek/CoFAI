@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
-from mpcompress.backbone.dinov3.eval.depth.metrics import calculate_depth_metrics
 
 
 def _extract_linear_head_state_dict(ckpt_obj):
