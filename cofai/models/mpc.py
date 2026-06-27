@@ -1090,6 +1090,7 @@ class MPC_I3(CompressionModel):
         self,
         dino_backbone={},
         dino_codec={},
+        heads: dict | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -1104,6 +1105,53 @@ class MPC_I3(CompressionModel):
             self.dino_codec = VitSeparateLatentCodec(**dino_codec)
 
         self.patch_size = self.dino.patch_size
+
+        # Optional task heads (engine-native path). When a head is configured for a
+        # task label, ``forward_test``/``decompress`` apply it and return the final
+        # task output under that label (``semseg`` / ``depth``). When no head is
+        # given they fall back to returning raw backbone features under ``seg`` /
+        # ``depth`` (legacy ``examples/vtc/run_eval.py`` applies heads externally).
+        self.heads = nn.ModuleDict()
+        if heads:
+            if not isinstance(heads, dict):
+                raise TypeError("heads must be a dict mapping task -> head config")
+            for task, hcfg in heads.items():
+                if not isinstance(task, str) or hcfg is None:
+                    continue
+                if not isinstance(hcfg, dict) or "type" not in hcfg:
+                    raise ValueError(f"heads.{task} must be a dict with a 'type' field")
+                self.heads[task] = instantiate_class(hcfg)
+
+    def _decode_tasks(self, h_hat, token_res, tasks):
+        """Decode requested tasks from reconstructed tokens.
+
+        ``seg`` / ``cls`` return raw backbone features (legacy contract). ``semseg``
+        / ``depth`` apply the configured head when present, otherwise fall back to
+        raw features.
+        """
+        task_feats = {}
+        if "cls" in tasks:
+            task_feats["cls"] = self.dino.decode_cls(h_hat)
+        if "seg" in tasks:
+            task_feats["seg"] = self.dino.decode_seg(h_hat, token_res)
+        if "semseg" in tasks:
+            feat = self.dino.decode_seg(h_hat, token_res)
+            task_feats["semseg"] = (
+                self.heads["semseg"].predict(feat, scale=int(self.patch_size))
+                if "semseg" in self.heads
+                else feat
+            )
+        if "depth" in tasks:
+            feat = self.dino.decode_depth(h_hat, token_res)
+            if "depth" in self.heads:
+                size = (
+                    int(token_res[0]) * int(self.patch_size),
+                    int(token_res[1]) * int(self.patch_size),
+                )
+                task_feats["depth"] = self.heads["depth"].predict(feat, size=size)
+            else:
+                task_feats["depth"] = feat
+        return task_feats
 
     def forward(self, x, qp=0, **kwargs):
         with torch.no_grad():
@@ -1200,13 +1248,7 @@ class MPC_I3(CompressionModel):
                         f"Unexpected token length: got {h_dino_hat.shape[1]}, expect {n_expected}."
                     )
 
-            task_feats = {}
-            if "cls" in tasks:
-                task_feats["cls"] = self.dino.decode_cls(h_dino_hat)
-            if "seg" in tasks:
-                task_feats["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
-            if "depth" in tasks:
-                task_feats["depth"] = self.dino.decode_depth(h_dino_hat, token_res)
+            task_feats = self._decode_tasks(h_dino_hat, token_res, tasks)
 
             return coded_unit, task_feats
 
@@ -1250,11 +1292,4 @@ class MPC_I3(CompressionModel):
                     f"Unexpected token length: got {h_hat.shape[1]}, expect {n_expected}."
                 )
 
-        task_feats = {}
-        if "cls" in tasks:
-            task_feats["cls"] = self.dino.decode_cls(h_hat)
-        if "seg" in tasks:
-            task_feats["seg"] = self.dino.decode_seg(h_hat, token_res)
-        if "depth" in tasks:
-            task_feats["depth"] = self.dino.decode_depth(h_hat, token_res)
-        return task_feats
+        return self._decode_tasks(h_hat, token_res, tasks)
