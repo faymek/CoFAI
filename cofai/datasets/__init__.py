@@ -2,6 +2,7 @@ from .image import (
     ImageFolder,
     ClassificationDataset,
     SegmentationDataset,
+    NYUDepthDataset,
 )
 from .feature import FeatureFolder, FeatureDictPerSampleFolder, FeatureDictPerKeyFolder, feature_dict_collate_fn
 from .video import VideoFolder
@@ -20,6 +21,7 @@ __all__ = [
     "ImageFolder",
     "ClassificationDataset",
     "SegmentationDataset",
+    "NYUDepthDataset",
     "FeatureFolder",
     "FeatureDictPerSampleFolder",
     "FeatureDictPerKeyFolder",

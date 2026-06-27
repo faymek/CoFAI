@@ -13,7 +13,7 @@ __all__ = [
     "BackboneProtocol",
     "VqganBackbone",
     "Dinov2TimmBackbone",
-    "Dinov3TimmBackbone"
+    "Dinov3TimmBackbone",
     "MAETimmBackbone",
     "SigLIP2TimmBackbone",
     "Dinov2TransformersBackbone",
