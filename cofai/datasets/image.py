@@ -397,9 +397,15 @@ class NYUDepthDataset(Dataset):
             img_name = img_path_obj.stem
             img_path = str(img_path_obj)
 
-        return image, {
+        # MMEngine-style dict sample, matching SegmentationDataset:
+        #   img  : HWC float32 in [0, 1]
+        #   meta : metadata dict
+        #   depth: HW float32 raw depth label (normalized later by the eval script)
+        img = np.array(image).astype(np.float32) / 255.0
+        meta = {
             "img_path": img_path,
             "img_name": img_name,
-            "ori_size": image.size,
-            "depth_label": depth.astype(np.float32, copy=False),
+            "img_size": (img.shape[0], img.shape[1]),
+            "ori_size": (img.shape[0], img.shape[1]),
         }
+        return {"img": img, "meta": meta, "depth": depth.astype(np.float32, copy=False)}

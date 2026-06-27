@@ -35,7 +35,6 @@ from cofai.utils.transforms import rgb2ycbcr, ycbcr2rgb
 from cofai.utils.debug import tensor_hash
 from cofai.backbone.dinov3.eval.depth.metrics import DEPTH_METRICS, calculate_depth_metrics
 from cofai.backbone.dinov3.eval.depth.datasets.datasets_utils import _EvalCropType, make_valid_mask
-import matplotlib.pyplot as plt
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -453,9 +452,17 @@ def eval_model(cfg):
     if getattr(cfg.args, "vis_n", 0) > 0:
         os.makedirs(cfg.args.vis_dir, exist_ok=True)
 
-    for sample_idx, (x, img_meta) in enumerate(tqdm.tqdm(dataset)):
+    for sample_idx, sample in enumerate(tqdm.tqdm(dataset)):
         stop_after_this_sample = False
-        x = ToTensor()(x).to(device)
+        # Unified MMEngine-style dict sample: {"img": HWC float32, "meta": {...}, <task label>}.
+        # Fall back to the legacy (img, meta) tuple for datasets not yet migrated.
+        if isinstance(sample, dict):
+            img = sample["img"]
+            img_meta = sample["meta"]
+        else:
+            img, img_meta = sample
+            sample = {}
+        x = ToTensor()(img).to(device)
         x = x.unsqueeze(0) if x.dim() == 3 else x
         x_orig = x.clone()
 
@@ -549,7 +556,13 @@ def eval_model(cfg):
             if do_hash_trace:
                 append_hash_trace(hash_trace, "seg.logits_pre_align", logits)
 
-            seg_label = img_meta["seg_label"]  # numpy [H, W]
+            seg_label = sample.get("semseg", img_meta.get("seg_label"))
+            if seg_label is None:
+                raise RuntimeError("Missing segmentation label ('semseg') in sample.")
+            seg_label = np.asarray(seg_label)
+            if seg_label.ndim == 3:  # HW1 -> HW
+                seg_label = seg_label[..., 0]
+            seg_label = seg_label.astype(np.int64)
             tgt_h, tgt_w = int(seg_label.shape[0]), int(seg_label.shape[1])
 
             # 当输入使用 center_pad 时，优先使用 center_crop 还原，避免插值引入偏差
@@ -606,7 +619,10 @@ def eval_model(cfg):
             if dep_out is None:
                 raise RuntimeError("Missing 'seg' output from model.decompress() for depth task.")
 
-            depth_label = torch.from_numpy(img_meta["depth_label"]).float().to(device)
+            depth_np = sample.get("depth", img_meta.get("depth_label"))
+            if depth_np is None:
+                raise RuntimeError("Missing depth label ('depth') in sample.")
+            depth_label = torch.from_numpy(np.asarray(depth_np)).float().to(device)
             if depth_label.dim() == 2:
                 depth_label = depth_label.unsqueeze(0).unsqueeze(0)
             elif depth_label.dim() == 3:
