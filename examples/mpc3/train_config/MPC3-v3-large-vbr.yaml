@@ -5,21 +5,21 @@ exp:
   quality: "1.0"
 
 model: 
-  type: mpcompress.models.MPC_I3
+  type: cofai.models.MPC_I3
   
   dino_backbone:
-    type: mpcompress.backbone.Dinov3TimmBackbone
+    type: cofai.backbone.Dinov3TimmBackbone
     model_size: large
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -1
+    slot: 24
     n_last_blocks: 1
     pretrained: false
     ckpt_path: /remote-home/wzl/MPCompress/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
 
   dino_codec:
-    type: mpcompress.latent_codecs.vit_feature_codec.VbrVitSeparateLatentCodec
+    type: cofai.latent_codecs.VisualTokenCodec
     h_dim: 1024
     y_dim: 120
     z_dim: 48
@@ -76,15 +76,13 @@ main_scheduler:
   gamma: 0.1
 
 train_dataset:
-  type: mpcompress.datasets.ImageFolder
+  type: cofai.datasets.ImageFolder
   root: /remote-home/wzl/dataset/imagenet
-  # root: /remote-home/wzl/MPCompress/data/mini_ImageNet
   split: train
 
 val_dataset:
-  type: mpcompress.datasets.ImageFolder
+  type: cofai.datasets.ImageFolder
   root: /remote-home/wzl/dataset/imagenet
-  # root: /remote-home/wzl/MPCompress/data/mini_ImageNet
   split: val
 
 train_transforms:
@@ -103,7 +101,7 @@ val_transforms:
     - type: torchvision.transforms.ToTensor
 
 criterion:
-  type: mpcompress.losses.MPC2Loss
+  type: cofai.losses.MPC2Loss
   rlmbda: 0.01
   num_prefix_tokens: 5
 

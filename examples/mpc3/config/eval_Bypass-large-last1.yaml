@@ -9,6 +9,7 @@ model:
   type: Dinov3TimmBypass
 
   dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
     model_size: large
     img_size: 512
     patch_size: 16
