@@ -178,8 +178,10 @@ def task_decode_pred(raw: Any, task: str) -> Any:
         output = output.permute(0, 2, 3, 1)
         output = F.softmax(output, dim=3)[:, :, :, 1] * 255
     elif task == "depth":
-        output.clamp_(min=0.0)
-        output = output.permute(0, 2, 3, 1)
+        # Keep NCHW: the depth meters (e.g. Dinov3DepthEstimationMeter) expect
+        # (B, 1, H, W) preds aligned with (B, 1, H, W) GT. Avoid an in-place clamp
+        # because task feats may be inference-mode tensors.
+        output = output.clamp(min=0.0)
     elif task == "scene":
         _, output = torch.max(output, dim=1)
     elif task == "cls":
