@@ -124,3 +124,116 @@ class Dinov2TimmBypass(CompressionModel):
         """
         h_dino = self.dino.encode(x)
         return h_dino.numel()
+
+
+@register_model("Dinov3TimmBypass")
+class Dinov3TimmBypass(CompressionModel):
+    """
+    A bypass model using DINOv3-Timm backbone for feature extraction without compression.
+
+    This model performs feature extraction using a DINOv3-Timm backbone and supports
+    multiple downstream tasks (classification, segmentation, depth estimation) without
+    any compression operations. It returns empty byte strings as a placeholder for
+    compressed data.
+
+    Args:
+        dino_backbone (dict): Configuration dictionary for the DINOv3-Timm backbone.
+            Passed directly to Dinov3TimmBackbone constructor.
+        heads (dict, optional): Mapping of task name to head configuration.
+        **kwargs (dict): Additional keyword arguments (currently unused).
+
+    Attributes:
+        dino (Dinov3TimmBackbone): The DINOv3-Timm backbone model.
+        patch_size (int): Patch size used by the backbone model.
+        heads (nn.ModuleDict): Task-specific head modules.
+    """
+
+    def __init__(
+        self,
+        dino_backbone={},
+        heads: dict | None = None,
+        **kwargs,
+    ):
+        super().__init__()
+        if "type" in dino_backbone:
+            self.dino = instantiate_class(dino_backbone)
+        else:
+            self.dino = Dinov3TimmBackbone(**dino_backbone)
+        self.patch_size = self.dino.patch_size
+
+        # Optional task heads (engine-native path). When a head is configured for a
+        # task label, ``forward_test`` returns the final task output under that label
+        # (``semseg`` / ``depth``); otherwise it returns raw backbone features under
+        # ``seg`` / ``depth`` (legacy ``run_eval.py`` applies heads externally).
+        self.heads = nn.ModuleDict()
+        if heads:
+            if not isinstance(heads, dict):
+                raise TypeError("heads must be a dict mapping task -> head config")
+            for task, hcfg in heads.items():
+                if not isinstance(task, str) or hcfg is None:
+                    continue
+                if not isinstance(hcfg, dict) or "type" not in hcfg:
+                    raise ValueError(f"heads.{task} must be a dict with a 'type' field")
+                self.heads[task] = instantiate_class(hcfg)
+
+    def forward_test(self, x, qp=0, tasks=[], **kwargs):
+        """
+        Forward pass for testing/inference without compression.
+
+        Extracts features with the DINOv3 backbone and produces raw task features
+        (``cls`` / ``seg`` / ``depth``) without any compression. The ``qp`` argument
+        is accepted for interface compatibility and ignored.
+
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, C, H, W).
+            qp (int): Unused; kept for a uniform codec interface.
+            tasks (list of str): Subset of ``cls`` / ``seg`` / ``depth``.
+
+        Returns:
+            coded_unit (dict): ``strings`` with an empty bypass payload and
+                ``pstate`` with the token resolution.
+            task_feats (dict): Per-task raw decoded features.
+        """
+        with torch.inference_mode():
+            h_dino = self.dino.encode(x)
+            token_res = (
+                x.shape[2] // self.dino.patch_size,
+                x.shape[3] // self.dino.patch_size,
+            )
+
+            task_feats = {}
+            if "cls" in tasks:
+                task_feats["cls"] = self.dino.decode_cls(h_dino)
+            if "seg" in tasks:
+                task_feats["seg"] = self.dino.decode_seg(h_dino, token_res)
+            if "semseg" in tasks:
+                feat = self.dino.decode_seg(h_dino, token_res)
+                task_feats["semseg"] = self.heads["semseg"].predict(
+                    feat, scale=int(self.patch_size)
+                )
+            if "depth" in tasks:
+                feat = self.dino.decode_depth(h_dino, token_res)
+                size = (
+                    int(token_res[0]) * int(self.patch_size),
+                    int(token_res[1]) * int(self.patch_size),
+                )
+                task_feats["depth"] = self.heads["depth"].predict(feat, size=size)
+
+            coded_unit = {
+                "strings": {"bypass": [[b""]]},  # empty bytes
+                "pstate": {"token_res": token_res},
+            }
+            return coded_unit, task_feats
+
+    def get_feature_numel(self, x):
+        """
+        Calculate the total number of elements in the extracted features.
+
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, C, H, W).
+
+        Returns:
+            numel (int): Total number of elements in the feature tensor.
+        """
+        h_dino = self.dino.encode(x)
+        return h_dino.numel()
