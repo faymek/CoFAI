@@ -37,24 +37,26 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-torch = {version = "2.4.0", source = "pytorch-cu121"}
-torchvision = {version = "0.19.0", source = "pytorch-cu121"}
+torch = {version = "2.6.0", source = "pytorch-cu124"}
+torchvision = {version = "0.21.0", source = "pytorch-cu124"}
 omegaconf = "^2.3.0"
 hydra-core = "^1.3.2"
 easydict = "^1.13"
 torchmetrics = "^1.7.0"
 iopath = "^0.1.10"
 fvcore = "^0.1.5.post20221221"
-xformers = "^0.0.27.post2"
+xformers = {version = "0.0.29.post3", source = "pytorch-cu124"}
 # submitit = { git = "https://github.com/facebookincubator/submitit.git" }
 tensorboard = "^2.19.0"
 timm = "^1.0.15"
 pytorch-lightning = "^2.5.1"
 pyiqa = "^0.1.13"
 # HF stack: huggingface-hub 1.x pairs with Transformers 5.x.
-# Cap <5.8: Transformers 5.8+ adds `from __future__ import annotations` in integrations/moe.py;
-# PyTorch 2.4's torch.library.custom_op infer_schema then fails at import. Use Torch >=2.5 to un-cap.
-transformers = ">=5,<5.8"
+# With Torch >=2.5 the old <5.8 cap is lifted (the cap existed because Torch 2.4's
+# torch.library.custom_op infer_schema fails on `from __future__ import annotations`
+# in transformers integrations/moe.py). Qwen3VL backbone already handles the
+# >=5.8 vision_utils API change.
+transformers = ">=5.8,<6"
 diffusers = "^0.33.1"
 accelerate = "^1.6.0"
 plotly = "^6.0.1"
@@ -84,8 +86,8 @@ zensical = "*"
 mkdocstrings-python = "*"
 
 [[tool.poetry.source]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
 
 [[tool.poetry.source]]
