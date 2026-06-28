@@ -1,4 +1,4 @@
-from .mpc import MPC_I1, MPC_I2, MPC_I3, MPC_I12, MPC_I12_CtxAsHyper
+from .mpc import MPC_I1, MPC_I2, MPC_I12, MPC_I12_CtxAsHyper
 from .base import DinoFeatureCodecModel
 from .lamofc import Dinov2TimmOnlyPatchCodec, Dinov2OrigSlideOnlyPatchCodec, Dinov2OrigSlideSegBypass, Dinov2OrigSlideSegVQFC, Dinov2OrigClsVQFC, Dinov2OrigClsBypass, Dinov2TimmSegVQFC
 from .bypass import Dinov2TimmBypass, Dinov3TimmBypass
@@ -10,7 +10,6 @@ from .orfc import Dinov2ClsORFC, Dinov2SlideSegORFC
 __all__ = [
     "MPC_I1",
     "MPC_I2",
-    "MPC_I3",
     "MPC_I12",
     "MPC_I12_CtxAsHyper",
     "DinoFeatureCodecModel",
