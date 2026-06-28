@@ -33,8 +33,12 @@ from cofai.utils.tensor_ops import tensor2image, center_pad, center_crop
 from cofai.utils.utils import rename_key_by_rules
 from cofai.utils.transforms import rgb2ycbcr, ycbcr2rgb
 from cofai.utils.debug import tensor_hash
-from cofai.backbone.dinov3.eval.depth.metrics import DEPTH_METRICS, calculate_depth_metrics
-from cofai.backbone.dinov3.eval.depth.datasets.datasets_utils import _EvalCropType, make_valid_mask
+from cofai.metrics.depth_estimation import (
+    DEPTH_METRICS,
+    _EvalCropType,
+    calculate_depth_metrics,
+    make_valid_mask,
+)
 
 from dotenv import load_dotenv
 load_dotenv()
