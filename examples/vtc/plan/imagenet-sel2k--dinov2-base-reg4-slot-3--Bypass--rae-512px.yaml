@@ -1,0 +1,72 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: imagenet-sel2k--dinov2-base-reg4-rae-512px--Bypass
+description: "data: ImageNet sel2k; model: Bypass + DINOv2-Base reg4 last4 + RAE decoder; task: reconstruction; rate: anchor (no codec)"
+args:
+  # Bypass has no entropy codec; run the estimate path (forward_test), not compress/decompress.
+  real: false
+dataset:
+  type: cofai.datasets.ImageFolder
+  root: ${PROJECT_ROOT}/data/ImageNet_val_sel2k
+  # This folder contains images; when tasks includes "rec", the dataset returns GT as sample["rec"] = img copy.
+  split: img
+  return_dict: true
+  tasks: [rec]
+test_transforms:
+  # PadToMultiple will also record the valid_roi, so we only calculate metrics on the valid region.
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img, rec]
+  - type: cofai.transforms.ToTensor
+    keys: [img, rec]
+collate:
+  mode: stack_only
+task_configs:
+  - label: rae
+    kind: rec
+    meter:
+      type: cofai.metrics.iqa_metrics.IQAPerSampleMeter
+      metrics: ["PSNR", "MS-SSIM"]
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+    with_registers: true
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+  heads:
+    rec:
+      type: cofai.heads.GeneralDecoder
+      decoder_config:
+        decoder_hidden_size: 1152
+        decoder_intermediate_size: 4096
+        decoder_num_attention_heads: 16
+        decoder_num_hidden_layers: 28
+        hidden_act: gelu
+        hidden_dropout_prob: 0.0
+        attention_probs_dropout_prob: 0.0
+        layer_norm_eps: 1e-12
+        initializer_range: 0.02
+        num_channels: 3
+        qkv_bias: true
+      patch_size: 16
+      image_size: 512
+      pretrained_path: ${PROJECT_ROOT}/weights/dinov2/rae_head/dinov2_base_reg4_rae_ViTXL_n08_i512.pth
+      normalization_stat_path: ${PROJECT_ROOT}/weights/dinov2/rae_head/dinov2_base_reg4_rae_imagenet1k_512_stat.pth
+      reshape_to_2d: true
+      eps: 1e-5
+      encoder_img_size: 512
+      encoder_patch_size: 16
+      encoder_hidden_size: 768
+      encoder_mean: [0.485, 0.456, 0.406]
+      encoder_std: [0.229, 0.224, 0.225]

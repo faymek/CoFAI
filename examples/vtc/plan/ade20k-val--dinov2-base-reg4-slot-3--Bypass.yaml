@@ -1,0 +1,55 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: ade20k-val--dinov2-base-reg4-slot-3--Bypass
+description: "data: ADE20K val; model: Bypass + DINOv2-Base reg4 slot-3 + semseg head; task: segmentation; rate: anchor (no codec)"
+args:
+  # Bypass has no entropy codec; run the estimate path (forward_test), not compress/decompress.
+  real: false
+dataset:
+  type: SegmentationDataset
+  root: ${PROJECT_ROOT}/data/ADEChallengeData2016
+  img_path: images/validation
+  seg_map_path: annotations/validation
+  file_list: null
+  reduce_zero_label: true
+test_transforms:
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img, semseg]
+  - type: cofai.transforms.AddIgnoreRegions
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    meter:
+      type: MeanIoUMetric
+      num_classes: 150
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+    with_registers: true
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+  heads:
+    semseg:
+      type: Dinov2SegmentationHead
+      in_channels: [768, 768, 768, 768]
+      in_index: [0, 1, 2, 3]
+      input_transform: resize_concat
+      channels: 3072
+      num_classes: 150
+      patch_size: 16
+      checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head_trained/ade20k_seg_base_reg4_last4.pth

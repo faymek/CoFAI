@@ -1,0 +1,27 @@
+# VTC / DINOv2 数据与权重清单 (cofai-download manifest)
+# poetry run cofai-download examples/vtc/dinov2-vtc.manifest.txt
+# 
+# 清单格式: <目标相对路径>  [URL]  [sha256:..]
+# 目标路径相对仓库根目录 (PROJECT_ROOT)。
+# 省略 URL 时, 默认从 https://medialab.sjtu.edu.cn/files/CoFAI-share/<目标相对路径> 下载,
+# sha256 允许只写前缀(如 8 位 sha256:95253fe4), 以缩短清单。
+
+
+# Dataset package
+data/ImageNet_val_sel2k.zip
+data/ADE20K.zip  sha256:95253fe4
+
+# --- 任务头 ---
+weights/dinov2/cls_head/dinov2_vitb14_reg4_linear_head.pth
+weights/dinov2/cls_head/dinov2_vitb14_reg4_linear4_head.pth
+
+weights/dinov2/semseg_head_trained/ade20k_seg_base_reg4_last1.pth
+weights/dinov2/semseg_head_trained/ade20k_seg_base_reg4_last4.pth
+
+weights/dinov2/rae_head/dinov2_base_reg4_rae_imagenet1k_512_stat.pth
+weights/dinov2/rae_head/dinov2_base_reg4_rae_ViTXL_n08_i512.pth
+
+
+# --- VTC 编解码器权重 ---
+weights/VTC/dinov2-vitb16-slot-3--VTC-vbr.pth
+weights/VTC/dinov2-vits16-slot-3--VTC-vbr.pth

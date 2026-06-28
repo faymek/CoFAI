@@ -1,0 +1,57 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: ade20k-val--dinov3-large-slot-1--Bypass
+description: "data: ADE20K val; model: Bypass + DINOv3-Large last1 layer + semseg head; task: segmentation; rate: anchor (no codec)"
+args:
+  # Bypass has no entropy codec; run the estimate path (forward_test), not compress/decompress.
+  real: false
+dataset:
+  type: SegmentationDataset
+  root: ${PROJECT_ROOT}/data/ADEChallengeData2016
+  img_path: images/validation
+  seg_map_path: annotations/validation
+  file_list: null
+  reduce_zero_label: true
+test_transforms:
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img, semseg]
+  - type: cofai.transforms.AddIgnoreRegions
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    meter:
+      type: MeanIoUMetric
+      num_classes: 150
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -1
+    n_last_blocks: 1
+    cast_dtype: float16
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+  heads:
+    semseg:
+      type: Dinov3SegmentationHead
+      in_channels: [1024]
+      in_index: [0]
+      input_transform: resize_concat
+      channels: 1024
+      num_classes: 150
+      patch_size: 16
+      checkpoint: ${PROJECT_ROOT}/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth

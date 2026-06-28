@@ -1,0 +1,61 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: imagenet-sel2k--dinov2-base-reg4-last4--VTC-vbr
+description: "data: ImageNet sel2k; model: VTC + DINOv2-Base reg4 last4 + cls head; task: classification; rate: VBR"
+dataset:
+  type: ClassificationDataset
+  root: ${PROJECT_ROOT}/data/ImageNet_val_sel2k
+  split: img
+  labels_file: imagenet_val_labels.txt
+  file_list: null
+  return_dict: true
+  label_key: cls
+  tasks: null
+test_transforms:
+  - type: cofai.transforms.PadToMultiple
+    multiple: 64
+collate:
+  mode: stack_only
+task_configs:
+  - label: cls
+    meter:
+      type: TopKAccuracyMetric
+      topk: [1, 5]
+load:
+  path: ${PROJECT_ROOT}/weights/VTC/dinov2-vitb16-slot-3--VTC-vbr.pth
+  strict: false
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+    with_registers: true
+  dino_codec:
+    type: cofai.latent_codecs.VisualTokenCodec
+    h_dim: 768
+    y_dim: 48
+    z_dim: 48
+    groups: 16
+    num_prefix_tokens: 5
+  heads:
+    cls:
+      type: Dinov2ClassifierHead
+      embed_dim: 768
+      layers: 4
+      checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitb14_reg4_linear4_head.pth
+
+multi_run:
+  0:
+  16:
+  32:
+  48:
+  64:
