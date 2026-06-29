@@ -86,6 +86,19 @@ class Dinov2TimmBackbone(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.dynamic_size = dynamic_size
+        # ``slot`` accepts an optional trailing "n" marker (e.g. "40n", "-1n", "n")
+        # meaning: after cutting at the integer position, apply the final
+        # ``model.norm`` at the *encode* boundary (and skip it again on decode).
+        # This lets a feature codec compress the post-norm features that the
+        # bespoke "compress the final seg features" models used (see
+        # ``Dinov2TimmSegVQFC``), making such setups rate-equivalent.
+        self.encode_norm = False
+        if isinstance(slot, str):
+            s = slot.strip()
+            if s.endswith("n"):
+                self.encode_norm = True
+                s = s[:-1].strip()
+            slot = None if s == "" else int(s)
         self.slot = slot
         self.n_last_blocks = n_last_blocks
         self.ckpt_path = ckpt_path
@@ -164,6 +177,8 @@ class Dinov2TimmBackbone(nn.Module):
             x = dino.norm_pre(x)
             for i, blk in enumerate(dino.blocks[: self.slot]):
                 x = blk(x)
+            if self.encode_norm:
+                x = dino.norm(x)
         return x
 
     def decode(self, h, token_res=None, task="whole"):
@@ -252,7 +267,7 @@ class Dinov2TimmBackbone(nn.Module):
                 f"only {len(multi_outputs)} / {len(need_layers)} blocks found"
             )
 
-            if norm:
+            if norm and not self.encode_norm:
                 if return_format == "[patch_rae]":
                     # For RAE: use LayerNorm without learnable affine parameters
                     # This matches Dinov2TimmwithNorm with normalize=True
