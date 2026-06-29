@@ -94,6 +94,15 @@ def _bits_from_coded_data(out: Dict[str, Any]) -> Dict[str, float]:
                 for k, v in bits_items.items():
                     flat[f"{layer_name}.{frame_name}.{k}"] = float(v)
         return flat
+    if out_type == "slide_crops":
+        # Sliding-window models emit one coded_unit per crop; aggregate the bits
+        # of every crop into a single per-codec total.
+        flat = {}
+        for coded_unit in out["data"]:
+            bits_items = _bits_from_coded_unit(coded_unit)
+            for k, v in bits_items.items():
+                flat[k] = flat.get(k, 0.0) + float(v)
+        return flat
     raise NotImplementedError(f"Unsupported type: {out_type!r}")
 
 
