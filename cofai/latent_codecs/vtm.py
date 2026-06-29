@@ -6,6 +6,10 @@ import subprocess
 import numpy as np
 from tempfile import mkstemp
 
+import torch
+import torch.nn as nn
+from omegaconf import OmegaConf
+
 
 def truncation(feat, trun_low, trun_high):
     """Truncate features to specified range.
@@ -606,3 +610,85 @@ class VtmFeatureCodec:
         os.unlink(rec_path)
 
         return decoded
+
+
+class VtmLatentCodec(nn.Module):
+    """Adapt :class:`VtmFeatureCodec` to the latent-codec API.
+
+    ``DinoFeatureCodecModel`` / ``DinoSlideFeatureCodecModel`` expect a codec that
+    exposes ``forward(h, token_res, qp) -> {"h_hat", "strings", ...}``,
+    ``compress(h, token_res, qp) -> {"strings", "pstate"}`` and
+    ``decompress(strings, pstate) -> {"h_hat"}`` operating on encoder token
+    tensors of shape ``(B, N, C)``. The raw :class:`VtmFeatureCodec` instead works
+    on numpy arrays packed as ``(B, 1, N, C)`` (its ``model_type="dinov2"``
+    packing) and keeps the VVC bitstream on disk between ``compress`` and
+    ``decompress``.
+
+    This thin wrapper bridges the two: tokens ``(B, N, C)`` are reshaped to the
+    ``(B, 1, N, C)`` array VTM expects, run through truncation + uniform
+    quantization + VTM intra coding, and the dequantized result is returned as a
+    torch tensor on the codec's device. Unlike VQFC, VTM compresses *all* tokens
+    (cls / register prefix included), matching ``Dinov2TimmVTM`` /
+    ``Dinov2TimmSlideVtm``; ``token_res`` is accepted for API symmetry but unused.
+
+    When used by :class:`DinoSlideFeatureCodecModel` with
+    ``slide_codec_mode="stacked"``, the model stacks every crop into the batch
+    dimension so VTM packs all crops into a single image and encodes them with one
+    VTM call -- reproducing the original sliding-window VTM rate.
+
+    Args:
+        cfg (dict | DictConfig): Configuration forwarded to
+            :class:`VtmFeatureCodec` (``vtm_path``, ``model_type``, ``bit_depth``,
+            ``trun_flag`` / ``trun_low`` / ``trun_high``, etc.). Plain dicts are
+            wrapped with OmegaConf so attribute access (``cfg.vtm_path``) works
+            after the engine resolves the model config to a container.
+    """
+
+    def __init__(self, cfg, **kwargs):
+        super().__init__()
+        if not OmegaConf.is_config(cfg):
+            cfg = OmegaConf.create(cfg)
+        self.vtm = VtmFeatureCodec(cfg=cfg)
+        # VtmFeatureCodec holds no tensors; this buffer tracks the device the
+        # module was moved to so ``decompress`` (which has no input tensor) can
+        # place ``h_hat`` correctly.
+        self.register_buffer("_device_anchor", torch.empty(0), persistent=False)
+
+    @property
+    def _device(self) -> torch.device:
+        return self._device_anchor.device
+
+    @staticmethod
+    def _tokens_to_array(h: torch.Tensor) -> np.ndarray:
+        """(B, N, C) encoder tokens -> (B, 1, N, C) numpy for VTM dinov2 packing."""
+        return h.detach().cpu().numpy()[:, None, :, :]
+
+    def _array_to_tokens(
+        self, arr: np.ndarray, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
+        """(B, 1, N, C) VTM output -> (B, N, C) torch tokens on ``device``."""
+        return torch.from_numpy(np.ascontiguousarray(arr[:, 0, :, :])).to(
+            device=device, dtype=dtype
+        )
+
+    def forward(self, h, token_res=None, qp=0, **kwargs):
+        feat_np = self._tokens_to_array(h)
+        coded_unit, decoded = self.vtm.forward_test(feat_np, qp=int(qp))
+        h_hat = self._array_to_tokens(decoded["h_hat"], device=h.device, dtype=h.dtype)
+        return {
+            "h_hat": h_hat,
+            "strings": coded_unit["strings"],
+            "pstate": coded_unit["pstate"],
+        }
+
+    def compress(self, h, token_res=None, qp=0, **kwargs):
+        feat_np = self._tokens_to_array(h)
+        encoded = self.vtm.compress(feat_np, qp=int(qp))
+        return {"strings": encoded["strings"], "pstate": encoded["pstate"]}
+
+    def decompress(self, strings, pstate, **kwargs):
+        decoded = self.vtm.decompress(strings=strings, pstate=pstate)
+        h_hat = self._array_to_tokens(
+            decoded["h_hat"], device=self._device, dtype=torch.float32
+        )
+        return {"h_hat": h_hat}
