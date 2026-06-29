@@ -22,6 +22,37 @@ examples/orfc/
 
 核心算法：`cofai/entropy_models/orfc_model.py`
 
+## 下载数据与权重
+
+权重与数据集压缩包均通过下载清单 `dinov2-orfc.manifest.txt` 一键拉取（默认从 `https://medialab.sjtu.edu.cn/files/CoFAI-share/` 按相对路径下载）。清单覆盖全部在线评测所需的数据集 zip、DINOv2 backbone（ViT-L/14、ViT-G/14）、分类/分割任务头与 ORFC 量化权重（.npz）。在仓库根目录执行：
+
+```bash
+poetry run cofai-download examples/orfc/dinov2-orfc.manifest.txt
+```
+
+数据集以压缩包形式下载到 `data/`，目前需**手动解压**到对应位置：
+
+```bash
+# ImageNet sel500 分类
+unzip data/ImageNet_val_sel500.zip -d data/
+# VOC2012 sel100 分割
+unzip data/VOC2012_sel100.zip -d data/
+```
+
+解压后的最终目录结构如下：
+
+```
+CoFAI/
+│
+├─ data/                                  # 评测所用数据子集
+│   ├─ ImageNet_val_sel500/
+│   └─ VOC2012_sel100/
+│
+├─ weights/                               # 预训练权重
+│   ├─ dinov2/                            # backbone + 分类/分割任务头
+│   └─ orfc/                              # ORFC 量化权重 (.npz)
+```
+
 ---
 
 ## 在线模式（Engine）
@@ -36,8 +67,8 @@ examples/orfc/
    - `VOC2012_sel100.zip` → 解压至 `$PROJECT_ROOT/data/VOC2012_sel100/`
 3. **权重**（网盘下载）：
    - `weights/dinov2/backbone/` — DINOv2 预训练 backbone
-   - `weights/dinov2/dinov2_cls_head/` — 分类线性头
-   - `weights/dinov2/dinov2_seg_head/` — 分割线性头
+   - `weights/dinov2/cls_head/` — 分类线性头
+   - `weights/dinov2/seg_head/` — 分割线性头
    - `weights/orfc/` — ORFC 量化权重（.npz）
 
 > 网盘地址：https://medialab.sjtu.edu.cn/files/CoFAI-share/
@@ -110,7 +141,7 @@ CUDA_VISIBLE_DEVICES=0 python examples/orfc/run_eval_orfc.py \
 2. **测试数据和权重**（网盘下载）：
    - `weights/orfc/` — 已训练的 ORFC 权重（如仅需测试）
    - `weights/dinov2/backbone/` — DINOv2 预训练 backbone（分割评测需要）
-   - `weights/dinov2/dinov2_seg_head/` — 分割线性头（分割评测需要）
+   - `weights/dinov2/semseg_head/` — 分割线性头（分割评测需要）
    - `data/VOC2012_sel100/` — VOC 分割子集（分割评测需要）
 3. **测试特征**（网盘下载）：
    - 从网盘 `weights/orfc/` 目录的说明获取预提取特征

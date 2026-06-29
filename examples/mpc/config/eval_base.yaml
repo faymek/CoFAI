@@ -51,56 +51,56 @@ heads:
     type: Dinov2ClassifierHead
     embed_dim: 384
     layers: 1
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vits14_linear_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vits14_linear_head.pth
 
   imagenet_cls_base_last1:
     type: Dinov2ClassifierHead
     embed_dim: 768
     layers: 1
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_linear_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitb14_linear_head.pth
 
   imagenet_cls_large_last1:
     type: Dinov2ClassifierHead
     embed_dim: 1024
     layers: 1
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitl14_linear_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitl14_linear_head.pth
 
   imagenet_cls_giant_last1:
     type: Dinov2ClassifierHead
     embed_dim: 1536
     layers: 1
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitg14_linear_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitg14_linear_head.pth
   
   # 分类头部，最后四层
   imagenet_cls_small_last4:
     type: Dinov2ClassifierHead
     embed_dim: 384
     layers: 4
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vits14_linear4_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vits14_linear4_head.pth
 
   imagenet_cls_base_last4:
     type: Dinov2ClassifierHead
     embed_dim: 768
     layers: 4
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_linear4_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitb14_linear4_head.pth
 
   imagenet_cls_base_reg4_last4:
     type: Dinov2ClassifierHead
     embed_dim: 768
     layers: 4
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_reg4_linear4_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitb14_reg4_linear4_head.pth
 
   imagenet_cls_large_last4:
     type: Dinov2ClassifierHead
     embed_dim: 1024
     layers: 4
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitl14_linear4_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitl14_linear4_head.pth
   
   imagenet_cls_giant_last4:
     type: Dinov2ClassifierHead
     embed_dim: 1536
     layers: 4
-    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitg14_linear4_head.pth
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/cls_head/dinov2_vitg14_linear4_head.pth
     
   voc2012_seg_small_last1:
     type: Dinov2SegmentationHead
@@ -110,7 +110,7 @@ heads:
     channels: 384
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_voc2012_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vits14_voc2012_linear_head.pth
   
   voc2012_seg_base_last1:
     type: Dinov2SegmentationHead
@@ -120,7 +120,7 @@ heads:
     channels: 768
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_voc2012_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitb14_voc2012_linear_head.pth
 
   voc2012_seg_large_last1:
     type: Dinov2SegmentationHead
@@ -130,7 +130,7 @@ heads:
     channels: 1024
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_voc2012_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitl14_voc2012_linear_head.pth
 
   voc2012_seg_giant_last1:
     type: Dinov2SegmentationHead
@@ -140,7 +140,7 @@ heads:
     channels: 1536
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_voc2012_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitg14_voc2012_linear_head.pth
 
   voc2012_seg_small_last4:
     type: Dinov2SegmentationHead
@@ -150,7 +150,7 @@ heads:
     channels: 1536
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_voc2012_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vits14_voc2012_ms_head.pth
 
   voc2012_seg_base_last4:
     type: Dinov2SegmentationHead
@@ -160,7 +160,7 @@ heads:
     channels: 3072
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_voc2012_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitb14_voc2012_ms_head.pth
 
   voc2012_seg_base_reg4_last4:
     type: Dinov2SegmentationHead
@@ -180,7 +180,7 @@ heads:
     channels: 4096
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_voc2012_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitl14_voc2012_ms_head.pth
 
   voc2012_seg_giant_last4:
     type: Dinov2SegmentationHead
@@ -190,7 +190,7 @@ heads:
     channels: 6144
     num_classes: 21
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_voc2012_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitg14_voc2012_ms_head.pth
 
   # ADE20K分割头部
   ade20k_seg_small_last4:
@@ -201,7 +201,7 @@ heads:
     channels: 1536
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_ade20k_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vits14_ade20k_ms_head.pth
 
   ade20k_seg_small_last1:
     type: Dinov2SegmentationHead
@@ -211,7 +211,7 @@ heads:
     channels: 384
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_ade20k_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vits14_ade20k_linear_head.pth
 
   ade20k_seg_base_last1:
     type: Dinov2SegmentationHead
@@ -221,7 +221,7 @@ heads:
     channels: 768
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_ade20k_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitb14_ade20k_linear_head.pth
 
   ade20k_seg_large_last1:
     type: Dinov2SegmentationHead
@@ -231,7 +231,7 @@ heads:
     channels: 1024
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_ade20k_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitl14_ade20k_linear_head.pth
 
   ade20k_seg_giant_last1:
     type: Dinov2SegmentationHead
@@ -241,7 +241,7 @@ heads:
     channels: 1536
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_ade20k_linear_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitg14_ade20k_linear_head.pth
 
   ade20k_seg_base_last4:
     type: Dinov2SegmentationHead
@@ -251,7 +251,7 @@ heads:
     channels: 3072
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_ade20k_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitb14_ade20k_ms_head.pth
 
   ade20k_seg_base_reg4_last4:
     type: Dinov2SegmentationHead
@@ -271,7 +271,7 @@ heads:
     channels: 4096
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_ade20k_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitl14_ade20k_ms_head.pth
   
   ade20k_seg_giant_last4:
     type: Dinov2SegmentationHead
@@ -281,7 +281,7 @@ heads:
     channels: 6144
     num_classes: 150
     patch_size: 16
-    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_ade20k_ms_head.pth
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/semseg_head/dinov2_vitg14_ade20k_ms_head.pth
 
   # --------------------------------------------------------------------------
   # RAE decoder heads (GeneralDecoder: patch tokens -> image)
@@ -329,8 +329,8 @@ heads:
       qkv_bias: true
     patch_size: 16
     image_size: 512
-    pretrained_path: ${PROJECT_ROOT}/weights/RAE/decoders/dinov2/wReg_base/ViTXL_n08_i512/model.pt
-    normalization_stat_path: ${PROJECT_ROOT}/weights/RAE/stats/dinov2/wReg_base/imagenet1k_512/stat.pt
+    pretrained_path: ${PROJECT_ROOT}/weights/dinov2/rae_head/dinov2_base_reg4_rae_ViTXL_n08_i512.pth
+    normalization_stat_path: ${PROJECT_ROOT}/weights/dinov2/rae_head/dinov2_base_reg4_rae_imagenet1k_512_stat.pth
     reshape_to_2d: true
     eps: 1e-5
     encoder_img_size: 512

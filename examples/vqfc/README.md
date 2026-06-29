@@ -2,6 +2,37 @@
 
 当前集成了论文 **“Transform-Free Feature Coding via Entropy-Constrained Vector Quantization” (VQFC)** 中的基线实验（基于 DINOv2 的特征压缩）。
 
+## 下载数据与权重
+
+权重与数据集压缩包均通过下载清单 `dinov2-vqfc.manifest.txt` 一键拉取（默认从 `https://medialab.sjtu.edu.cn/files/CoFAI-share/` 按相对路径下载）。清单覆盖 DINOv2 ViT-G/14 backbone、分类/分割任务头，以及 VQFC 的全部码本权重（cls: 8/16/32/512/2048，seg: 16/64/256/512 及 lmbda3 变体）。在仓库根目录执行：
+
+```bash
+poetry run cofai-download examples/vqfc/dinov2-vqfc.manifest.txt
+```
+
+数据集以压缩包形式下载到 `data/`，目前需**手动解压**到对应位置：
+
+```bash
+# ImageNet sel100 分类
+unzip data/ImageNet_val_sel100.zip -d data/
+# VOC2012 分割（含 VOC2012_sel20.txt 选图列表）
+unzip data/VOC2012.zip -d data/
+```
+
+解压后的最终目录结构如下：
+
+```
+CoFAI/
+│
+├─ data/                                  # 评测所用数据子集
+│   ├─ ImageNet_val_sel100/
+│   └─ VOC2012/
+│
+├─ weights/                               # 预训练权重
+│   ├─ dinov2/                            # backbone + 分类/分割任务头
+│   └─ VQFC/                              # VQFC 码本 (.pth.tar)
+```
+
 ## cofai-eval 评测
 
 **cofai-eval** 是基于 Hydra 配置的统一评测入口，通过 **`poetry run cofai-eval`** 命令串联数据集、模型与指标（详见 [docs/engine.md](../../docs/engine.md)）。VQFC 对应 plan 位于 `conf/plan/`，可与下方脚本评测对照使用。

@@ -19,44 +19,43 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 ## 下载数据与权重
 
-如下是数据权重的分享链接
+权重与数据集压缩包均通过下载清单 `dinov2-mpc.manifest.txt` 一键拉取（默认从 `https://medialab.sjtu.edu.cn/files/CoFAI-share/` 按相对路径下载）。清单覆盖三个数据集 zip、MPC 编解码器权重（small/base/large/base-reg4 的 VBR 版）、DINOv2 分类/分割任务头与 RAE 解码器。**DINOv2 backbone 经 timm/HuggingFace 在线加载，无需下载**（请按上文设置 `HF_ENDPOINT` 镜像）。在仓库根目录执行：
 
-Share content: CoFAI-share
-Link: https://pan.sjtu.edu.cn/web/share/2f9f14e05fa73c8742994aae67198dff
-Extraction code: 1127
+```bash
+poetry run cofai-download examples/mpc/dinov2-mpc.manifest.txt
+```
 
-请下载链接中的数据与权重到对应文件夹，形成如下的目录结构。
+数据集以压缩包形式下载到 `data/`，目前需**手动解压**到对应位置：
+
+```bash
+# ImageNet sel2k 分类
+unzip data/ImageNet_val_sel2k.zip -d data/
+# VOC2012 分割
+unzip data/VOC2012.zip -d data/
+# ADE20K 分割
+unzip data/ADE20K.zip -d data/
+```
+
+解压后的最终目录结构如下：
 
 ```
 CoFAI/
 │
-├─ data/                                  # 论文实验所用各数据子集
-│   ├─ ADEChallengeData2016/
-│   │   ├─ images/
-│   │   └─ annotations/
+├─ data/                                  # 评测所用数据子集
 │   ├─ ImageNet_val_sel2k/
 │   │   ├─ img/
 │   │   └─ imagenet_val_labels.txt
-│   └─ VOC2012/
-│       ├─ Annotations/
-│       ├─ .../
-│       └─ JPEGImages/
+│   ├─ VOC2012/
+│   │   ├─ JPEGImages/
+│   │   └─ SegmentationClass/
+│   └─ ADEChallengeData2016/
+│       ├─ images/
+│       └─ annotations/
 │
-├─ weights/                               # 预训练权重与下载脚本
-│   ├─ dinov2/
-│   │   ├─ clf_head/
-│   │   ├─ seg_head/
-│   │   └─ download_pretrained.sh
-│   └─ MPC/
-│       ├─ MPC2-v3-base-vbr-pruned.pth.tar
-│       ├─ MPC2-v3-small-vbr-pruned.pth.tar
-│       └─ MPC2-v3-large-vbr-pruned.pth.tar
+├─ weights/                               # 预训练权重
+│   ├─ dinov2/                            # 分类 (dinov2_cls_head) / 分割 (semseg_head) 任务头
+│   ├─ MPC/                               # MPC 编解码器 (.pth.tar)
 ```
-
-
-
-
-
 
 ## 测试方法（专用脚本 `run_eval.py`，参考）
 
