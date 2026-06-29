@@ -1,0 +1,30 @@
+# @package _global_
+heads:
+  # -----------------------------
+  # ADE20K segmentation heads
+  # -----------------------------
+  ade20k_seg_large_last1:
+    type: Dinov3SegmentationHead
+    in_channels: [1024]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1024
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+
+  # -----------------------------
+  # NYUv2 depth estimation heads
+  # -----------------------------
+  nyuv2_dep_large_last1:
+    type: Dinov3DepthHead
+    in_channels: [1024]
+    min_depth: 0.001
+    max_depth: 10.0
+    n_output_channels: 256
+    use_backbone_norm: true
+    use_batchnorm: true
+    use_cls_token: false
+    bins_strategy: linear
+    norm_strategy: linear
+    checkpoint: ${PROJECT_ROOT}/weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
