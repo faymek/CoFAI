@@ -69,6 +69,14 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
 ```
 
+需要统计 **latent codec 复杂度**（参数量、编码/解码 FLOPs、codec 耗时）时，加上 `args.profile=true`；结果会写入 `result.json` 末尾的 `codec_*` 字段（`codec_params`、`codec_enc_flops`、`codec_dec_flops`、`codec_enc_time`、`codec_dec_time`）。`args.max_samples` 同样生效，不设则跑完整数据集后取平均。
+
+```bash
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml \
+  args.profile=true
+```
+
 参考结果（Bypass 不压缩，作为各任务的精度上界）：
 
 | Plan | bpp | 指标 |
