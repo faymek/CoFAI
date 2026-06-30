@@ -115,8 +115,13 @@ def inference_model(
     real: bool = False,
     tasks: List[str] | None = None,
     task_specs: Any | None = None,
+    profile: bool = False,
 ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
-    """Single inference helper used by unified eval."""
+    """Single inference helper used by unified eval.
+
+    When ``profile`` is True, the codec-only encode/decode times recorded by the
+    model (``model._codec_time``) are merged into the returned timing dict.
+    """
 
     if tasks is None:
         tasks = []
@@ -134,14 +139,18 @@ def inference_model(
         dec_time = time.time() - t1
 
         bits_items = _bits_from_coded_data(coded_data)
-        time_items = {"enc_time": float(enc_time), "dec_time": float(dec_time)}
+        time_items = {"total_enc_time": float(enc_time), "total_dec_time": float(dec_time)}
+        if profile:
+            time_items.update(getattr(model, "_codec_time", {}) or {})
         return time_items, bits_items, task_feats
 
     t0 = time.time()
     coded_data, task_feats = model.forward_test(x, qp=qp, tasks=tasks, **codec_kw)
     elapsed = time.time() - t0
     bits_items = _bits_from_coded_data(coded_data)
-    time_items = {"enc_time": float(elapsed) / 2.0, "dec_time": float(elapsed) / 2.0}
+    time_items = {"total_enc_time": float(elapsed) / 2.0, "total_dec_time": float(elapsed) / 2.0}
+    if profile:
+        time_items.update(getattr(model, "_codec_time", {}) or {})
     return time_items, bits_items, task_feats
 
 
@@ -286,6 +295,7 @@ def eval_step(
         real=cfg.args.real,
         tasks=tasks,
         task_specs=task_specs,
+        profile=bool(cfg.args.profile),
     )
 
     missing = [t for t in tasks if t not in (task_feats or {})]
@@ -405,6 +415,59 @@ def write_eval_outputs(
     return canonical_path
 
 
+def measure_codec_complexity(
+    *, loader: Any, model: Any, device: Any, qp: Any, max_samples: int | None
+) -> Dict[str, Any]:
+    """Average latent-codec params/FLOPs over the dataset (profile pass).
+
+    Runs before the eval loop so the codec is measured on clean (non
+    inference-mode) state. ``codec_params`` is constant; the ``*_flops`` fields
+    are averaged over samples (they vary with input resolution).
+    """
+    params: Optional[int] = None
+    flops: Dict[str, List[int]] = {}
+    seen = 0
+    total = int(max_samples) if max_samples and max_samples > 0 else len(loader.dataset)
+    with tqdm(total=total, desc="Profiling", unit="sample") as pbar:
+        for batch in loader:
+            img = batch.inputs["img"].to(device, non_blocking=True)
+            comp = model.codec_complexity(img, qp=qp)
+            params = comp.get("codec_params", params)
+            for k, v in comp.items():
+                if k.endswith("_flops"):
+                    flops.setdefault(k, []).append(int(v))
+            seen += 1
+            pbar.update(1)
+            if max_samples and max_samples > 0 and seen >= max_samples:
+                break
+
+    out: Dict[str, Any] = {}
+    if params is not None:
+        out["codec_params"] = params
+    for k, vals in flops.items():
+        out[k] = sum(vals) / len(vals)
+    return out
+
+
+def _group_codec_keys(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """Reorder a summary so all ``codec_*`` fields are grouped at the end."""
+    codec_order = [
+        "codec_params",
+        "codec_enc_flops",
+        "codec_dec_flops",
+        "codec_enc_time",
+        "codec_dec_time",
+    ]
+    non_codec = {k: v for k, v in summary.items() if not k.startswith("codec_")}
+    codec = {k: v for k, v in summary.items() if k.startswith("codec_")}
+    ordered: Dict[str, Any] = dict(non_codec)
+    for k in codec_order:
+        if k in codec:
+            ordered[k] = codec.pop(k)
+    ordered.update(codec)
+    return ordered
+
+
 def finalize_results(
     *, records: List[Dict[str, Any]], evaluator: MultiTaskEvaluator
 ) -> Dict[str, Any]:
@@ -477,6 +540,16 @@ def run_eval(
     ms = cfg.args.max_samples
     max_samples_i = int(ms) if ms is not None else None
 
+    complexity: Dict[str, Any] = {}
+    if bool(cfg.args.profile) and hasattr(model, "codec_complexity"):
+        complexity = measure_codec_complexity(
+            loader=loader,
+            model=model,
+            device=device,
+            qp=cfg.args.quality,
+            max_samples=max_samples_i,
+        )
+
     records = eval_loop(
         loader=loader,
         model=model,
@@ -484,7 +557,26 @@ def run_eval(
         max_samples=max_samples_i,
         ctx=step_ctx,
     )
+
     summary = finalize_results(records=records, evaluator=evaluator)
+    summary.update(complexity)
+    summary = _group_codec_keys(summary)
+
+    if "codec_params" in summary:
+        if summary["codec_params"] == 0:
+            print("[complexity] codec params: 0 (bypass)")
+        else:
+            print(f"[complexity] codec params: {summary['codec_params'] / 1e6:.2f} M")
+    bypass = summary.get("codec_params") == 0
+    for key, label in (("codec_enc_flops", "enc"), ("codec_dec_flops", "dec")):
+        if key not in summary:
+            continue
+        if summary[key] == 0 and bypass:
+            print(f"[complexity] codec {label} FLOPs: 0 (bypass)")
+        elif summary[key] == 0:
+            print(f"[complexity] codec {label} FLOPs: 0")
+        else:
+            print(f"[complexity] codec {label} FLOPs: {summary[key] / 1e9:.2f} G")
 
     run_name = str(plan_cfg.name)
     description = str(plan_cfg.description)

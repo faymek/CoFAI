@@ -143,7 +143,7 @@ def _validate_step_output_soft(step_output: StepOutput) -> None:
     timing = step_output.timing or {}
     bits = step_output.bits or {}
 
-    required_timing = {"enc_time", "dec_time"}
+    required_timing = {"total_enc_time", "total_dec_time"}
     missing = [k for k in sorted(required_timing) if k not in timing]
     if missing:
         _warn(f"missing timing keys: {missing}")
@@ -169,7 +169,7 @@ def _validate_step_output_soft(step_output: StepOutput) -> None:
         if not isinstance(r, dict):
             _warn(f"record[{i}] is not dict: {type(r)!r}")
             continue
-        for need in ("file", "quality", "enc_time", "dec_time", "bpp"):
+        for need in ("file", "quality", "total_enc_time", "total_dec_time", "bpp"):
             if need not in r:
                 _warn(f"record[{i}] missing field {need!r}")
 
