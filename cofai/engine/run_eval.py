@@ -596,14 +596,19 @@ def main() -> None:
     """Package entrypoint: `python -m cofai.engine.run_eval`."""
 
     load_dotenv(override=True, encoding="utf-8")
-    a = sys.argv
-    # conf/**/*.yaml → --config-name=<path under conf without .yaml>
-    for i in range(1, len(a)):
-        t = a[i].replace("\\", "/")
-        if t.startswith("conf/") and t.endswith(".yaml"):
-            a[i] = "--config-name=" + Path(t[5:]).with_suffix("").as_posix()
+    argv = sys.argv
+    # Sugar: a positional `*.yaml` plan path → Hydra --config-dir/--config-name,
+    # so any plan (under conf/ or elsewhere) runs as `cofai-eval path/to/plan.yaml`.
+    # Overrides like `args.x=y` contain '=', so they are left untouched.
+    for i, arg in enumerate(argv[1:], start=1):
+        if arg.endswith(".yaml") and "=" not in arg:
+            plan = Path(arg)
+            argv[i : i + 1] = [
+                f"--config-dir={plan.parent.resolve()}",
+                f"--config-name={plan.stem}",
+            ]
             break
-    a.extend(["hydra.run.dir=.", "hydra.output_subdir=null"])
+    argv += ["hydra.run.dir=.", "hydra.output_subdir=null"]
     _hydra_cli()
 
 
