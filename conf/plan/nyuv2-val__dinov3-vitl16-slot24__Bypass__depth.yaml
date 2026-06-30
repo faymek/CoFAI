@@ -1,0 +1,64 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: nyuv2-val__dinov3-vitl16-slot24__Bypass__depth
+description: "Data: NYUv2 val; Model: DINOv3 ViT-L/16 slot24; Codec: Bypass; Task: depth estimation"
+args:
+  # Bypass has no entropy codec; run the estimate path (forward_test), not compress/decompress.
+  real: false
+dataset:
+  type: NYUDepthDataset
+  root: ${PROJECT_ROOT}/data/NYU
+  split_file: nyu_test.txt
+test_transforms:
+  # NYU images are 480x640 (divisible by the patch size); only the image needs to
+  # become a tensor. The raw depth GT is kept as a HxW array and normalized by the
+  # meter (normalization_constant).
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img]
+  - type: cofai.transforms.ToTensor
+    keys: [img]
+collate:
+  mode: stack_only
+task_configs:
+  - label: depth
+    meter:
+      type: Dinov3DepthEstimationMeter
+      names: [rmse, abs_rel, a1]
+      min_depth: 0.001
+      max_depth: 10.0
+      ignored_value: 0.0
+      eval_mask: NYU_EIGEN
+      normalization_constant: 1000.0
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: 24
+    n_last_blocks: 1
+    cast_dtype: float16
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+  heads:
+    depth:
+      type: Dinov3DepthHead
+      in_channels: [1024]
+      min_depth: 0.001
+      max_depth: 10.0
+      n_output_channels: 256
+      use_backbone_norm: true
+      use_batchnorm: true
+      use_cls_token: false
+      bins_strategy: linear
+      norm_strategy: linear
+      checkpoint: ${PROJECT_ROOT}/weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
