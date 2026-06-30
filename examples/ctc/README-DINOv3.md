@@ -17,7 +17,66 @@
 
 > 注意：CTC 评测取用的最后一层特征是 **norm 之前** 的特征。
 
-## 2. 统一架构总览
+
+## 2. 下载数据与权重
+
+权重与数据集压缩包通过下载清单 `dinov3-ctc.manifest.txt` 一键拉取并按 sha256 校验（默认从 `https://medialab.sjtu.edu.cn/files/CoFAI-share/` 按相对路径下载）。在仓库根目录执行：
+
+```bash
+poetry run cofai-download examples/ctc/dinov3-ctc.manifest.txt
+```
+
+数据集以压缩包形式下载到 `data/`，目前需**手动解压**到对应位置：
+
+```bash
+unzip data/ADE20K.zip -d data/
+unzip data/NYU_subset_for_training_depth_head.zip -d data/
+```
+
+解压后的最终目录结构如下：
+
+```
+CoFAI/
+│
+├─ data/                                  # 数据子集
+│   ├─ ADEChallengeData2016/
+│   │   ├─ images/
+│   │   └─ annotations/
+│   └─ NYU/
+│       ├─ train/  test/
+│       └─ nyu_train.txt  nyu_test.txt
+│
+├─ weights/                               # 预训练权重
+│   └─ dinov3/
+│       ├─ backbone/
+│       ├─ semseg_head/
+│       └─ dpt_head/
+```
+
+## 3. 运行测试
+
+> Plan 文件通过 `${PROJECT_ROOT}` 引用权重/数据路径，运行前请先设置环境变量 `PROJECT_ROOT`（见项目根目录 README）。
+
+通过统一评测引擎 `cofai-eval` 执行任一 plan，结果（bpp / bpfp / mIoU 或 RMSE 等）写入 `logs/<plan-name>/result.json`：
+
+```bash
+# ADE20K 语义分割（Bypass 基线）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
+
+# NYUv2 深度估计（Bypass 基线）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
+```
+
+参考结果（Bypass 不压缩，作为各任务的精度上界）：
+
+| Plan | bpp | 指标 |
+|------|-----|------|
+| `ade20k-val__dinov3-vitl16-slot24__Bypass__semseg` | 0.0 | mIoU 0.5309 |
+| `nyuv2-val__dinov3-vitl16-slot24__Bypass__depth` | 0.0 | RMSE 0.3477 |
+
+## 4. 统一架构总览
 
 重构前，每一种「backbone × 压缩方法 × 任务」的组合都对应一个独立的 `CompressionModel` 子类（`Dinov2OrigClsVQFC`、`Dinov2TimmSegVQFC`、各种 `*Bypass` / `*SlideSeg*` …），导致 slide 逻辑、prefix 处理、bits 统计等代码到处复制。
 
@@ -29,7 +88,7 @@
 | **Backbone** | 提取 / 重建 DINO 特征，定义切分点（slot） | timm 统一 | `cofai/backbone/timm.py` |
 | **LatentCodec** | 真正的压缩组件，遵循统一 token 接口 | 固定一组 | `cofai/latent_codecs/` |
 
-## 3. 模型组织：两个 CodecModel
+## 5. 模型组织：两个 CodecModel
 
 均定义于 `cofai/models/base.py`。CTC 默认使用单窗口的 `DinoFeatureCodecModel`，由三个可插拔组件构成：
 
@@ -56,7 +115,7 @@
 - `per_crop`（默认）—— 每个 crop 单独调用一次 codec。
 - `stacked` —— 所有 crop 堆进 batch 维，一次 codec 调用，例如使用标准编码器（VTM）。
 
-## 4. LatentCodec 接口契约
+## 6. LatentCodec 接口契约
 
 所有 codec 都是 `nn.Module`，对**编码器 token 张量 `(B, N, C)`** 操作，实现以下三个方法（`token_res` 给空间型 codec 用，`qp` 给可变码率 codec 用）：
 
@@ -66,7 +125,7 @@ compress(h, token_res, qp)   -> {"strings", "pstate"} # 仅编码
 decompress(strings, pstate)  -> {"h_hat"}                    # 仅解码
 ```
 
-## 5. Backbone 与分割点（slot）
+## 7. Backbone 与分割点（slot）
 
 backbone 统一用 timm 实现：`Dinov2TimmBackbone` / `Dinov3TimmBackbone`（`cofai/backbone/timm.py`）。backbone size 由 `model_size` + `patch_size` 决定，在 plan 文件名里写作 `vitl16`、`vitg14`、`vitb16` 等。
 
@@ -90,7 +149,7 @@ slot 约定：transformer block 从 0 开始计数记作 `Layer n`，其输入�
 
 
 
-## 6. 下游任务头与权重
+## 8. 下游任务头与权重
 
 CTC 当前落地的两个任务头（见 `conf/heads/dinov3_head.yaml`）：
 
@@ -101,7 +160,7 @@ CTC 当前落地的两个任务头（见 `conf/heads/dinov3_head.yaml`）：
 
 目标检测、图像重建任务头待定。
 
-## 7. Plan 组合与命名
+## 9. Plan 组合与命名
 
 用于参考的 plan 放在 `conf/plan/` 目录下，一般是 Bypass 基线。
 各个提案的 plan 放在 `examples/proposal-xxx/plan/` 目录下。
@@ -149,30 +208,12 @@ conf/dinov2-plan/ade20k-val__dinov2-vitb16-reg4-slot09__Bypass__semseg-last4.yam
 conf/dinov2-plan/imagenet-sel500__dinov2-vitl14-slot11__ORFC__cls.yaml
 ```
 
-## 8. 运行
-
-通过统一评测引擎 `cofai-eval` 执行任一 plan：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 \
-  poetry run cofai-eval \
-  conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
-
-# plan 内定义了 multi_run 时做 RD 扫描
-CUDA_VISIBLE_DEVICES=0 \
-  poetry run cofai-eval \
-  conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml \
-  args.multi_run=true
-```
-
-结果（bpp / bpfp / mIoU 或 RMSE 等）写入 `logs/<plan-name>/result.json`。
-
-## 9. 增加新组合的步骤
+## 10. 增加新组合的步骤
 
 得益于归约，新增一种实验通常**无需写 Python**：
 
 1. 选 CodecModel（单窗口 `DinoFeatureCodecModel` / 滑窗 `DinoSlideFeatureCodecModel`）。
 2. 选 backbone + slot。
-3. 选 LatentCodec 并填参数；若需新压缩算法，新增一个遵循第 4 节接口的 `XxxFeatureCodec` 并在 `cofai/latent_codecs/__init__.py` 导出。
+3. 选 LatentCodec 并填参数；若需新压缩算法，新增一个遵循第 6 节接口的 `XxxFeatureCodec` 并在 `cofai/latent_codecs/__init__.py` 导出。
 4. 选 head 与数据集。
-5. 按第 7 节命名写 plan，丢进对应 plan 目录，用 `cofai-eval` 跑。
+5. 按第 9 节命名写 plan，丢进对应 plan 目录，用 `cofai-eval` 跑。
