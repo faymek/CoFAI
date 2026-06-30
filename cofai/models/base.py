@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,6 +9,7 @@ from compressai.models.base import CompressionModel
 from cofai.backbone import Dinov2TimmBackbone, Dinov3TimmBackbone
 from cofai.latent_codecs import BypassLatentCodec
 from cofai.engine.registry import instantiate_class, register
+from cofai.utils.complexity import latent_codec_complexity
 
 
 @register("DinoFeatureCodecModel")
@@ -147,12 +150,25 @@ class DinoFeatureCodecModel(CompressionModel):
         h_dino = self.dino.encode(x)
         return h_dino.numel()
 
+    def codec_complexity(self, x, qp=0):
+        """Latent-codec params (static) plus encode/decode FLOPs on ``x``'s tokens."""
+        with torch.no_grad():
+            h_dino = self.dino.encode(x)
+            token_res = self._token_res(x.shape[2], x.shape[3])
+        return latent_codec_complexity(self.dino_codec, h_dino, token_res, qp)
+
     def forward_test(self, x, qp=0, tasks=[], **kwargs):
         with torch.inference_mode():
             h_dino = self.dino.encode(x)
             token_res = self._token_res(x.shape[2], x.shape[3])
 
+            t0 = time.time()
             coded_unit = self.dino_codec(h_dino, token_res, qp=qp)
+            codec_t = time.time() - t0
+            self._codec_time = {
+                "codec_enc_time": codec_t / 2.0,
+                "codec_dec_time": codec_t / 2.0,
+            }
             h_dino_hat = coded_unit["h_hat"]
 
             task_feats = self._decode_tasks(h_dino_hat, token_res, tasks)
@@ -162,7 +178,9 @@ class DinoFeatureCodecModel(CompressionModel):
         h_dino = self.dino.encode(x)
         token_res = self._token_res(x.shape[2], x.shape[3])
 
+        t0 = time.time()
         coded_unit = self.dino_codec.compress(h_dino, token_res, qp=qp)
+        self._codec_time = {"codec_enc_time": time.time() - t0}
         if "pstate" not in coded_unit:
             coded_unit["pstate"] = {}
         coded_unit["pstate"]["token_res"] = token_res
@@ -170,7 +188,11 @@ class DinoFeatureCodecModel(CompressionModel):
 
     def decompress(self, coded_unit, tasks=[], **kwargs):
         token_res = coded_unit["pstate"]["token_res"]
+        t0 = time.time()
         decoded = self.dino_codec.decompress(**coded_unit)
+        codec_t = time.time() - t0
+        self._codec_time = getattr(self, "_codec_time", {})
+        self._codec_time["codec_dec_time"] = codec_t
         h_hat = decoded["h_hat"]
         return self._decode_tasks(h_hat, token_res, tasks)
 
@@ -415,6 +437,33 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
         embed_dim = int(self.dino.model.embed_dim)
         return len(crops) * hw * embed_dim
 
+    def codec_complexity(self, x, qp=0):
+        """Latent-codec params and encode/decode FLOPs over all slide crops."""
+        slide_res = self._slide_res
+        crops = self._get_slide_crops(x.shape[2], x.shape[3])
+        with torch.no_grad():
+            if self.slide_codec_mode == "stacked":
+                h = self._encode_crops_stacked(x, crops)
+                return latent_codec_complexity(self.dino_codec, h, slide_res, qp)
+            y1, x1, y2, x2 = crops[0]
+            out = latent_codec_complexity(
+                self.dino_codec,
+                self.dino.encode(x[:, :, y1:y2, x1:x2]),
+                slide_res,
+                qp,
+            )
+            for y1, x1, y2, x2 in crops[1:]:
+                comp = latent_codec_complexity(
+                    self.dino_codec,
+                    self.dino.encode(x[:, :, y1:y2, x1:x2]),
+                    slide_res,
+                    qp,
+                )
+                for key in ("codec_enc_flops", "codec_dec_flops"):
+                    if key in comp:
+                        out[key] = out.get(key, 0) + comp[key]
+        return out
+
     def _encode_crops_stacked(self, x, crops):
         """Encode every crop and stack them along the batch dim -> ``(N_crop, N, C)``.
 
@@ -436,9 +485,12 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
             slide_res = self._slide_res
             crops = self._get_slide_crops(x.shape[2], x.shape[3])
 
+            codec_t = 0.0
             if self.slide_codec_mode == "stacked":
                 h_stack = self._encode_crops_stacked(x, crops)
+                t0 = time.time()
                 out = self.dino_codec(h_stack, slide_res, qp=qp)
+                codec_t += time.time() - t0
                 seg_feats_per_crop = self._seg_feats_from_stacked_hat(
                     out["h_hat"], slide_res, len(crops)
                 )
@@ -448,12 +500,18 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
                 seg_feats_per_crop = []
                 for y1, x1, y2, x2 in crops:
                     h = self.dino.encode(x[:, :, y1:y2, x1:x2])
+                    t0 = time.time()
                     out = self.dino_codec(h, slide_res, qp=qp)
+                    codec_t += time.time() - t0
                     crop_units.append(self._crop_unit_for_bits(out))
                     seg_feats_per_crop.append(
                         self.dino.decode_seg(out["h_hat"], token_res=slide_res)
                     )
 
+            self._codec_time = {
+                "codec_enc_time": codec_t / 2.0,
+                "codec_dec_time": codec_t / 2.0,
+            }
             task_feats = self._decode_slide_tasks(
                 seg_feats_per_crop, crops, (x.shape[2], x.shape[3]), tasks
             )
@@ -465,15 +523,21 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
             slide_res = self._slide_res
             crops = self._get_slide_crops(x.shape[2], x.shape[3])
 
+            codec_t = 0.0
             if self.slide_codec_mode == "stacked":
                 h_stack = self._encode_crops_stacked(x, crops)
+                t0 = time.time()
                 crop_units = [self.dino_codec.compress(h_stack, slide_res, qp=qp)]
+                codec_t += time.time() - t0
             else:
                 crop_units = []
                 for y1, x1, y2, x2 in crops:
                     h = self.dino.encode(x[:, :, y1:y2, x1:x2])
+                    t0 = time.time()
                     crop_units.append(self.dino_codec.compress(h, slide_res, qp=qp))
+                    codec_t += time.time() - t0
 
+            self._codec_time = {"codec_enc_time": codec_t}
             return {
                 "type": "slide_crops",
                 "data": crop_units,
@@ -494,17 +558,24 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
             slide_res = tuple(pstate["slide_res"])
             mode = pstate.get("mode", self.slide_codec_mode)
 
+            codec_t = 0.0
             if mode == "stacked":
+                t0 = time.time()
                 decoded = self.dino_codec.decompress(**crop_units[0])
+                codec_t += time.time() - t0
                 seg_feats_per_crop = self._seg_feats_from_stacked_hat(
                     decoded["h_hat"], slide_res, len(crops)
                 )
             else:
                 seg_feats_per_crop = []
                 for enc in crop_units:
+                    t0 = time.time()
                     decoded = self.dino_codec.decompress(**enc)
+                    codec_t += time.time() - t0
                     seg_feats_per_crop.append(
                         self.dino.decode_seg(decoded["h_hat"], token_res=slide_res)
                     )
 
+            self._codec_time = getattr(self, "_codec_time", {})
+            self._codec_time["codec_dec_time"] = codec_t
             return self._decode_slide_tasks(seg_feats_per_crop, crops, img_hw, tasks)
