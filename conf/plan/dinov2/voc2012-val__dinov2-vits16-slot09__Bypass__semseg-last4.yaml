@@ -6,8 +6,8 @@ defaults:
   - /heads: dinov2_head
   - _self_
 
-name: voc2012-val--Bypass-dinov2-small-last4
-description: "data: VOC2012 val; model: Bypass-dinov2-small-last4; task: segmentation"
+name: voc2012-val__dinov2-vits16-slot09__Bypass__semseg-last4
+description: "Data: VOC2012 val; Model: DINOv2 ViT-S/16 slot09 last4; Codec: Bypass; Task: semantic segmentation"
 dataset: ${datasets.voc2012_val}
 test_transforms:
   - type: cofai.transforms.PadImage
@@ -27,14 +27,17 @@ task_configs:
       type: MeanIoUMetric
       num_classes: 21
 model:
-  type: Dinov2TimmBypass
+  type: DinoFeatureCodecModel
   dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
     model_size: small
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -3
+    slot: 9
     n_last_blocks: 4
     with_registers: false
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
   heads:
     semseg: ${heads.voc2012_seg_small_last4}

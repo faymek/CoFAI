@@ -6,8 +6,8 @@ defaults:
   - /heads: dinov2_head
   - _self_
 
-name: imagenet-sel2k--Bypass-dinov2-base-reg4-rae-512px
-description: "data: ImageNet sel2k; model: Bypass + DINOv2-base reg4 last1 layer + RAE decoder; task: reconstruction"
+name: imagenet-sel2k__dinov2-vitb16-reg4-slot09__Bypass__rae-512px
+description: "Data: ImageNet sel2k; Model: DINOv2 ViT-B/16 reg4 slot09; Codec: Bypass; Task: reconstruction"
 dataset:
   type: cofai.datasets.ImageFolder
   root: ${PROJECT_ROOT}/data/ImageNet_val_sel2k
@@ -31,14 +31,17 @@ task_configs:
       type: cofai.metrics.iqa_metrics.IQAPerSampleMeter
       metrics: ["PSNR", "MS-SSIM"]
 model:
-  type: Dinov2TimmBypass
+  type: DinoFeatureCodecModel
   dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
     model_size: base
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -3
+    slot: 9
     n_last_blocks: 4
     with_registers: true
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
   heads:
     rec: ${heads.rae_dinov2_base_reg4_512px}

@@ -3,14 +3,13 @@ defaults:
   - /args: default
   - /dataloader: default
   - /data: imagenet_sel100
-  - /model: VQFC-dinov2-giant-cls-512
   - /heads: dinov2_head
   - /metrics:
     - cls_metrics
   - _self_
 
-name: imagenet-sel100--VQFC-dinov2-giant-cls
-description: "data: ImageNet sel100; model: VQFC + DINOv2-giant cls token + cls decoder; task: classification. With args.multi_run=true, sweeps codebook sizes 8/16/32/512/2048 on pretrained weights."
+name: imagenet-sel100__dinov2-vitg14-slot40__VQFC__cls
+description: "Data: ImageNet sel100; Model: DINOv2 ViT-G/14 slot40; Codec: VQFC; Task: classification"
 dataset: ${datasets.imagenet_sel100}
 test_transforms:
   - type: cofai.transforms.ResizeImage
@@ -22,16 +21,23 @@ task_configs:
     kind: cls
     meter: ${metrics.cls_metrics}
 model:
-  type: Dinov2OrigClsVQFC
+  type: DinoFeatureCodecModel
   dino_backbone:
+    # Unified to Dinov2TimmBackbone. At 224 the backbone features differ from
+    # Dinov2OrgBackbone at the bit level (pos_embed interpolation), but cls accuracy
+    # is equivalent within noise (sel100 91/88, sel2k 75.25/76.2). See
+    # cofai/backbone/README.md.
+    type: cofai.backbone.Dinov2TimmBackbone
     model_size: giant
     img_size: 224
     patch_size: 14
     dynamic_size: false
-    slot: null
+    slot: 40
     n_last_blocks: 1
-    ckpt_path: ${PROJECT_ROOT}/weights/dinov2/backbone/dinov2_vitg14_pretrain.pth
-  vqfc_codec:
+  dino_codec:
+    type: cofai.latent_codecs.VQFeatureCodec
+    num_prefix_tokens: 1
+    drop_prefix: false
     num_embeddings: 512
     embedding_dim: 64
     num_chunks: 1
@@ -45,7 +51,7 @@ model:
 multi_run:
   8:
     model:
-      vqfc_codec:
+      dino_codec:
         num_embeddings: 8
         embedding_dim: 64
         num_chunks: 1
@@ -53,7 +59,7 @@ multi_run:
         ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/cls/epoch_100num_8chunk_1.pth.tar
   16:
     model:
-      vqfc_codec:
+      dino_codec:
         num_embeddings: 16
         embedding_dim: 64
         num_chunks: 1
@@ -61,7 +67,7 @@ multi_run:
         ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/cls/epoch_100num_16chunk_1.pth.tar
   32:
     model:
-      vqfc_codec:
+      dino_codec:
         num_embeddings: 32
         embedding_dim: 64
         num_chunks: 1
@@ -69,7 +75,7 @@ multi_run:
         ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/cls/epoch_100num_32chunk_1.pth.tar
   512:
     model:
-      vqfc_codec:
+      dino_codec:
         num_embeddings: 512
         embedding_dim: 64
         num_chunks: 1
@@ -77,7 +83,7 @@ multi_run:
         ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/cls/epoch_100num_512chunk_1.pth.tar
   2048:
     model:
-      vqfc_codec:
+      dino_codec:
         num_embeddings: 2048
         embedding_dim: 32
         num_chunks: 1

@@ -1,0 +1,67 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: voc2012_sel20
+  - /heads: dinov2_head
+  - /metrics:
+    - voc2012_seg_metrics
+  - _self_
+
+name: voc2012-sel20__dinov2-vitg14-slide-slot40__VTM__semseg
+description: "Data: VOC2012 sel20; Model: DINOv2 ViT-G/14 slide slot40; Codec: VTM; Task: semantic segmentation"
+dataset: ${datasets.voc2012_sel20}
+test_transforms:
+  - type: cofai.transforms.ResizeImage
+    size: [518]
+    keys: [img]
+  - type: cofai.transforms.ResizeImage
+    size: [518]
+    keys: [semseg]
+    interpolation: NEAREST
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    kind: semseg
+    meter: ${metrics.voc2012_seg_metrics}
+model:
+  type: DinoSlideFeatureCodecModel
+  slide_size: [518, 518]
+  slide_stride: [259, 259]
+  slide_codec_mode: stacked
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: giant
+    img_size: 518
+    patch_size: 14
+    dynamic_size: false
+    slot: 40
+    n_last_blocks: 1
+  dino_codec:
+    type: cofai.latent_codecs.VtmLatentCodec
+    cfg:
+      vtm_path: ${PROJECT_ROOT}/weights/std_codec/VTM-21.0
+      model_type: dinov2
+      task: seg
+      max_v: 103.2168
+      min_v: -530.9767
+      trun_high: 20
+      trun_low: -20
+      trun_flag: true
+      quant_samples: 0
+      quant_type: uniform
+      bit_depth: 10
+  heads:
+    semseg: ${heads.voc2012_seg_giant_last1}
+
+# RD sweep: each key is a VTM QP, becomes args.quality and output subdir
+# logs/<name>/q<qp>/. Empty values mean "only change the QP" (codec cfg fixed).
+# Omit args.multi_run (false) to run once; then pass args.quality=<qp> on the CLI.
+multi_run:
+  37:
+  42:
+  47:
+  52:

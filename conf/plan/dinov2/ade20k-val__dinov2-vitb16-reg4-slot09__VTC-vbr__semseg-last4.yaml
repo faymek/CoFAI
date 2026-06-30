@@ -3,14 +3,13 @@ defaults:
   - /args: default
   - /dataloader: default
   - /data: ade20k_val
-  - /model: MPC-dinov2-base-last4-vbr
   - /heads: dinov2_head
   - /metrics:
     - ade20k_seg_metrics
   - _self_
 
-name: ade20k-val--MPC-dinov2-base-last4-vbr
-description: "data: ADE20K val; model: MPC2-v3 VBR + DINOv2-base last4 layers + ade20k_seg_base_last4; task: segmentation"
+name: ade20k-val__dinov2-vitb16-reg4-slot09__VTC-vbr__semseg-last4
+description: "Data: ADE20K val; Model: DINOv2 ViT-B/16 reg4 slot09 last4; Codec: VTC (vbr); Task: semantic segmentation"
 dataset: ${datasets.ade20k_val}
 test_transforms:
   - type: cofai.transforms.PadImage
@@ -28,29 +27,28 @@ task_configs:
   - label: semseg
     meter: ${metrics.ade20k_seg_metrics}
 load:
-  path: ${PROJECT_ROOT}/weights/MPC/MPC2-v3-base-vbr-pruned.pth.tar
+  path: ${PROJECT_ROOT}/weights/VTC/dinov2-vitb16-slot-3--VTC-vbr.pth
   strict: false
-  rules:
-    - ["startswith", "dino.model", "useless"]
-    - ["startswith", "heads.", "useless"]
 model:
-  type: MPC_I2
+  type: DinoFeatureCodecModel
   dino_backbone:
     type: cofai.backbone.Dinov2TimmBackbone
     model_size: base
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -3
+    slot: 9
     n_last_blocks: 4
+    with_registers: true
   dino_codec:
-    type: cofai.latent_codecs.vit_feature_codec.VbrVitUnionLatentCodec
+    type: cofai.latent_codecs.VisualTokenCodec
     h_dim: 768
     y_dim: 48
     z_dim: 48
     groups: 16
+    num_prefix_tokens: 5
   heads:
-    semseg: ${heads.ade20k_seg_base_last4}
+    semseg: ${heads.ade20k_seg_base_reg4_last4}
 
 multi_run:
   0:

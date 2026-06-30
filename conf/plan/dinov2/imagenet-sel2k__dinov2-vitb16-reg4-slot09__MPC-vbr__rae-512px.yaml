@@ -6,8 +6,8 @@ defaults:
   - /heads: dinov2_head
   - _self_
 
-name: imagenet-sel2k--MPC2-v3-base-vbr-reg4-rae-512px
-description: "data: ImageNet sel2k; model: MPC2-v3 base VBR reg4 + RAE decoder; task: reconstruction. With args.multi_run=true, sweeps qp 0/8/…/64."
+name: imagenet-sel2k__dinov2-vitb16-reg4-slot09__MPC-vbr__rae-512px
+description: "Data: ImageNet sel2k; Model: DINOv2 ViT-B/16 reg4 slot09; Codec: MPC (vbr); Task: reconstruction"
 args:
   real: false
 dataset:
@@ -37,14 +37,14 @@ load:
   rules:
     - ["startswith", "dino.model", "useless"]
 model:
-  type: MPC_I2
+  type: DinoFeatureCodecModel
   dino_backbone:
     type: cofai.backbone.Dinov2TimmBackbone
     model_size: base
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -3
+    slot: 9
     n_last_blocks: 4
     with_registers: true
     rae_decode_blocks: null

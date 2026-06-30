@@ -1,0 +1,45 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: voc2012_sel20
+  - /heads: dinov2_head
+  - /metrics:
+    - voc2012_seg_metrics
+  - _self_
+
+name: voc2012-sel20__dinov2-vitg14-slide-slot40__Bypass__semseg
+description: "Data: VOC2012 sel20; Model: DINOv2 ViT-G/14 slide slot40; Codec: Bypass; Task: semantic segmentation"
+dataset: ${datasets.voc2012_sel20}
+test_transforms:
+  - type: cofai.transforms.ResizeImage
+    size: [518]
+    keys: [img]
+  - type: cofai.transforms.ResizeImage
+    size: [518]
+    keys: [semseg]
+    interpolation: NEAREST
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    kind: semseg
+    meter: ${metrics.voc2012_seg_metrics}
+model:
+  type: DinoSlideFeatureCodecModel
+  slide_size: [518, 518]
+  slide_stride: [259, 259]
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: giant
+    img_size: 518
+    patch_size: 14
+    dynamic_size: false
+    slot: 40
+    n_last_blocks: 1
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+  heads:
+    semseg: ${heads.voc2012_seg_giant_last1}

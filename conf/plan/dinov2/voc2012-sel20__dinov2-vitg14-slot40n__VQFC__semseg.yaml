@@ -1,0 +1,84 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: voc2012_sel20
+  - /heads: dinov2_head
+  - /metrics:
+    - voc2012_seg_metrics
+  - _self_
+
+name: voc2012-sel20__dinov2-vitg14-slot40n__VQFC__semseg
+description: "Data: VOC2012 sel20; Model: DINOv2 ViT-G/16 slot40n (post-norm); Codec: VQFC; Task: semantic segmentation"
+dataset: ${datasets.voc2012_sel20}
+test_transforms:
+  - type: cofai.transforms.ResizeImage
+    size: [512]
+    keys: [img, semseg]
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img, semseg]
+  - type: cofai.transforms.AddIgnoreRegions
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    meter: ${metrics.voc2012_seg_metrics}
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: giant
+    img_size: 512
+    patch_size: 14
+    dynamic_size: true
+    slot: "40n"
+    n_last_blocks: 1
+  dino_codec:
+    type: cofai.latent_codecs.VQFeatureCodec
+    num_prefix_tokens: 1
+    drop_prefix: true
+    num_embeddings: 64
+    embedding_dim: 50
+    num_chunks: 1
+    lmbda: 1.0
+    ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/seg/epoch_300num_64chunk_1.pth.tar
+  heads:
+    semseg: ${heads.voc2012_seg_giant_last1}
+
+# RD sweep: each key becomes args.quality (string) and output subdir logs/<name>/q<key>/.
+# VQFC has no codec QP; keys denote num_embeddings for bookkeeping / summary alignment.
+# Omit args.multi_run (false) to run once with the default 64-codebook codec.
+multi_run:
+  16:
+    model:
+      dino_codec:
+        num_embeddings: 16
+        embedding_dim: 180
+        ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/seg/epoch_300num_16chunk_1.pth.tar
+  64:
+    model:
+      dino_codec:
+        num_embeddings: 64
+        embedding_dim: 50
+        ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/seg/epoch_300num_64chunk_1.pth.tar
+  256:
+    model:
+      dino_codec:
+        num_embeddings: 256
+        embedding_dim: 20
+        ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/seg/epoch_300num_256chunk_1.pth.tar
+  512:
+    model:
+      dino_codec:
+        num_embeddings: 512
+        embedding_dim: 10
+        ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/seg/epoch_300num_512chunk_1.pth.tar
+  512_lambda3:
+    model:
+      dino_codec:
+        num_embeddings: 512
+        embedding_dim: 10
+        ckpt_path: ${PROJECT_ROOT}/weights/VQFC/DINOv2/seg/epoch_300num_512chunk_1_lmbda_3.pth.tar

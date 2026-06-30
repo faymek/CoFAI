@@ -3,14 +3,13 @@ defaults:
   - /args: default
   - /dataloader: default
   - /data: imagenet_sel2k
-  - /model: VTC-dinov2-base-reg4-last4-vbr
   - /heads: dinov2_head
   - /metrics:
     - cls_metrics
   - _self_
 
-name: imagenet-sel2k--VTC-dinov2-base-reg4-last4-vbr
-description: "data: ImageNet sel2k; model: VTC + dinov2 base reg4 last4 layers + cls decoder; task: classification"
+name: imagenet-sel2k__dinov2-vitb16-slot09__MPC-vbr__cls-last4
+description: "Data: ImageNet sel2k; Model: DINOv2 ViT-B/16 slot09 last4; Codec: MPC (vbr); Task: classification"
 dataset: ${datasets.imagenet_sel2k}
 test_transforms:
   - type: cofai.transforms.PadToMultiple
@@ -21,28 +20,26 @@ task_configs:
   - label: cls
     meter: ${metrics.cls_metrics}
 load:
-  path: ${PROJECT_ROOT}/weights/VTC/VTC-dinov2-base-reg4-last4-vbr-pruned.pth
+  path: ${PROJECT_ROOT}/weights/MPC/MPC2-v3-base-vbr-pruned.pth.tar
   strict: false
 model:
-  type: MPC_I2
+  type: DinoFeatureCodecModel
   dino_backbone:
     type: cofai.backbone.Dinov2TimmBackbone
     model_size: base
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -3
+    slot: 9
     n_last_blocks: 4
-    with_registers: true
   dino_codec:
-    type: cofai.latent_codecs.VisualTokenCodec
+    type: cofai.latent_codecs.vit_feature_codec.VbrVitUnionLatentCodec
     h_dim: 768
     y_dim: 48
     z_dim: 48
     groups: 16
-    num_prefix_tokens: 5
   heads:
-    cls: ${heads.imagenet_cls_base_reg4_last4}
+    cls: ${heads.imagenet_cls_base_last4}
 
 multi_run:
   0:

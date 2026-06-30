@@ -6,8 +6,8 @@ defaults:
   - /heads: dinov2_head
   - _self_
 
-name: ade20k-val--Bypass-dinov2-base-reg4-last4
-description: "data: ADE20K val; model: Bypass + DINOv2-base reg4 last4 layers + semseg decoder; task: segmentation"
+name: ade20k-val__dinov2-vitb16-reg4-slot09__Bypass__semseg-last4
+description: "Data: ADE20K val; Model: DINOv2 ViT-B/16 reg4 slot09 last4; Codec: Bypass; Task: semantic segmentation"
 dataset: ${datasets.ade20k_val}
 test_transforms:
   - type: cofai.transforms.PadToMultiple
@@ -24,14 +24,17 @@ task_configs:
       type: MeanIoUMetric
       num_classes: 150
 model:
-  type: Dinov2TimmBypass
+  type: DinoFeatureCodecModel
   dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
     model_size: base
     img_size: 512
     patch_size: 16
     dynamic_size: true
-    slot: -3
+    slot: 9
     n_last_blocks: 4
     with_registers: true
+  dino_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
   heads:
     semseg: ${heads.ade20k_seg_base_reg4_last4}
