@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from compressai.models.base import CompressionModel
 
-from cofai.backbone import Dinov2TimmBackbone, Dinov3TimmBackbone
+from cofai.backbone import Dinov2TimmBackbone, Dinov3TimmBackbone, Qwen3VLBackbone
 from cofai.latent_codecs import BypassLatentCodec
 from cofai.engine.registry import instantiate_class, register
 from cofai.utils.complexity import latent_codec_complexity
@@ -579,3 +579,105 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
             self._codec_time = getattr(self, "_codec_time", {})
             self._codec_time["codec_dec_time"] = codec_t
             return self._decode_slide_tasks(seg_feats_per_crop, crops, img_hw, tasks)
+
+
+@register("Qwen3vlFeatureCodecModel")
+class Qwen3vlFeatureCodecModel(CompressionModel):
+    """Compress Qwen3VL visual features for VQA text generation.
+
+    Extracts breakpoint tokens with :class:`~cofai.backbone.Qwen3VLBackbone`
+    in ``(B, L, C)`` layout (same contract as :class:`DinoFeatureCodecModel`),
+    compresses with a latent codec, and continues generation through the LM.
+    """
+
+    def __init__(
+        self,
+        qwen_backbone=None,
+        qwen_codec=None,
+        device=None,
+        **kwargs,
+    ):
+        super().__init__()
+        qwen_backbone = dict(
+            qwen_backbone or {"type": "cofai.backbone.Qwen3VLBackbone"}
+        )
+        qwen_codec = dict(
+            qwen_codec or {"type": "cofai.latent_codecs.BypassLatentCodec"}
+        )
+        if device is not None:
+            qwen_backbone.setdefault("device", str(device))
+
+        self.qwen = instantiate_class(qwen_backbone)
+        self.qwen_codec = instantiate_class(qwen_codec)
+
+    @staticmethod
+    def _vqa_prompt(task_data):
+        vqa = (task_data or {}).get("vqa")
+        if not isinstance(vqa, dict):
+            raise KeyError("Qwen VQA requires task_data['vqa'].")
+        prompt = vqa.get("prompt")
+        if not isinstance(prompt, str):
+            raise TypeError("task_data['vqa']['prompt'] must be a string.")
+        return prompt
+
+    def forward_test(self, image, qp=0, tasks=None, task_data=None, **kwargs):
+        with torch.inference_mode():
+            tasks = tasks or []
+            h_tokens, token_res = self.qwen.encode_image(image)
+            self._feature_numel = h_tokens.numel()
+
+            t0 = time.time()
+            coded_unit = self.qwen_codec(h_tokens, token_res, qp=qp)
+            codec_t = time.time() - t0
+            self._codec_time = {
+                "codec_enc_time": codec_t / 2.0,
+                "codec_dec_time": codec_t / 2.0,
+            }
+            task_feats = {}
+            if "vqa" in tasks:
+                task_feats["vqa"] = self.qwen.decode_text(
+                    coded_unit["h_hat"],
+                    prompt=self._vqa_prompt(task_data),
+                    token_res=token_res,
+                )
+            if "pstate" not in coded_unit:
+                coded_unit["pstate"] = {}
+            coded_unit["pstate"]["token_res"] = token_res
+            return coded_unit, task_feats
+
+    def compress(self, image, qp=0, **kwargs):
+        h_tokens, token_res = self.qwen.encode_image(image)
+        self._feature_numel = h_tokens.numel()
+
+        t0 = time.time()
+        coded_unit = self.qwen_codec.compress(h_tokens, token_res, qp=qp)
+        self._codec_time = {"codec_enc_time": time.time() - t0}
+        if "pstate" not in coded_unit:
+            coded_unit["pstate"] = {}
+        coded_unit["pstate"]["token_res"] = token_res
+        return coded_unit
+
+    def decompress(self, coded_unit, tasks=None, task_data=None, **kwargs):
+        tasks = tasks or []
+        token_res = tuple(coded_unit["pstate"]["token_res"])
+        t0 = time.time()
+        decoded = self.qwen_codec.decompress(**coded_unit)
+        codec_t = time.time() - t0
+        self._codec_time = getattr(self, "_codec_time", {})
+        self._codec_time["codec_dec_time"] = codec_t
+        task_feats = {}
+        if "vqa" in tasks:
+            task_feats["vqa"] = self.qwen.decode_text(
+                decoded["h_hat"],
+                prompt=self._vqa_prompt(task_data),
+                token_res=token_res,
+            )
+        return task_feats
+
+    def get_feature_numel(self, _image=None):
+        return self._feature_numel
+
+    def codec_complexity(self, image, qp=0):
+        with torch.no_grad():
+            h_tokens, token_res = self.qwen.encode_image(image)
+        return latent_codec_complexity(self.qwen_codec, h_tokens, token_res, qp)

@@ -1,6 +1,11 @@
 from .base import BackboneProtocol
 from .tokenizer import VqganBackbone
-from .timm import Dinov2TimmBackbone, MAETimmBackbone, SigLIP2TimmBackbone, Dinov3TimmBackbone
+from .timm import (
+    Dinov2TimmBackbone,
+    MAETimmBackbone,
+    SigLIP2TimmBackbone,
+    Dinov3TimmBackbone,
+)
 from .transformers import (
     Dinov2TransformersBackbone,
     MAETransformersBackbone,
@@ -8,6 +13,7 @@ from .transformers import (
 )
 from .dinov2_org import Dinov2OrgBackbone
 from .vgg import VGGBackbone, setup_vgg_feature_extractor, extract_vgg_features
+from .qwen3vl import Qwen3VLBackbone
 
 __all__ = [
     "BackboneProtocol",
@@ -23,6 +29,7 @@ __all__ = [
     "VGGBackbone",
     "setup_vgg_feature_extractor",
     "extract_vgg_features",
+    "Qwen3VLBackbone",
 ]
 
 backbone_tools = {

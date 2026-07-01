@@ -1,0 +1,13 @@
+# Qwen3VL CTC 数据集清单 (cofai-download manifest)
+#
+# 格式: <目标相对路径>  [URL]  [sha256:..]
+# 目标路径相对仓库根目录 (PROJECT_ROOT)。
+# 省略 URL 时, 默认从 https://medialab.sjtu.edu.cn/files/CoFAI-share/<目标相对路径> 下载,
+# sha256 允许只写前缀(如 8 位 sha256:5b581d48), 以缩短清单。
+#
+# 用法:
+#   # 下载缺失/损坏的 MMStar TSV 并校验
+#   poetry run cofai-download examples/ctc/qwen3vl-ctc.manifest.txt
+
+# Dataset
+data/MMStar.tsv  sha256:5b581d48

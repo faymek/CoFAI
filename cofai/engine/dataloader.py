@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import numpy as np
 import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -14,20 +15,19 @@ __all__ = ["build_dataloader", "collate_fn"]
 
 
 def collate_fn(batch: List[Dict[str, Any]]) -> EvalBatch:
-    """Collate eval samples: ``torch.stack`` images → ``inputs[\"img\"]``, list ``samples`` (no ``img``).
-
-    Requires identical spatial size per item (plain ``stack``).
-    """
+    """Stack the shared image input and preserve per-task sample payloads."""
 
     if not batch:
         raise ValueError("Empty batch")
+
     xs: List[torch.Tensor] = []
     samples: List[Dict[str, Any]] = []
     for item in batch:
-        xs.append(_to_chw(item["img"]))
-        s = dict(item)
-        s.pop("img")
-        samples.append(s)
+        if "img" not in item:
+            raise KeyError("Eval batch items must contain the shared `img` field.")
+        sample = dict(item)
+        xs.append(_to_chw(sample.pop("img")))
+        samples.append(sample)
     return EvalBatch(inputs={"img": torch.stack(xs, dim=0)}, samples=samples)
 
 
@@ -44,8 +44,12 @@ def build_dataloader(cfg: Any, dataset: Any) -> DataLoader:
 def _to_chw(x: Any) -> torch.Tensor:
     if isinstance(x, torch.Tensor):
         t = x
+    elif isinstance(x, np.ndarray):
+        t = torch.from_numpy(np.ascontiguousarray(x))
+        if t.dim() == 3:
+            t = t.permute(2, 0, 1)
     else:
-        # PIL or ndarray: use ToTensor lazily to avoid importing torchvision here
+        # PIL: use ToTensor lazily to avoid importing torchvision here.
         from torchvision.transforms import ToTensor
 
         t = ToTensor()(x)

@@ -18,6 +18,7 @@ ALLOWED_KINDS = {
     "sal",
     "normals",
     "scene",
+    "vqa",
 }
 
 
@@ -91,4 +92,3 @@ class MultiTaskEvaluator:
         for label, meter in self.meters.items():
             out[label] = meter.compute()
         return out
-

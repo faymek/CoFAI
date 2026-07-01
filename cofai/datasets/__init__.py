@@ -4,7 +4,12 @@ from .image import (
     SegmentationDataset,
     NYUDepthDataset,
 )
-from .feature import FeatureFolder, FeatureDictPerSampleFolder, FeatureDictPerKeyFolder, feature_dict_collate_fn
+from .feature import (
+    FeatureFolder,
+    FeatureDictPerSampleFolder,
+    FeatureDictPerKeyFolder,
+    feature_dict_collate_fn,
+)
 from .video import VideoFolder
 from .video_reader import PngSequenceVideoReader, YUV420VideoReader
 from .video_writer import PngSequenceVideoWriter, YUV420VideoWriter
@@ -16,6 +21,7 @@ from .mlore import (
     get_mlore_dataset,
     collate_mlore,
 )
+from .mmstar import MMStarDataset
 
 __all__ = [
     "ImageFolder",
@@ -37,4 +43,5 @@ __all__ = [
     "NYUDDataset",
     "get_mlore_dataset",
     "collate_mlore",
+    "MMStarDataset",
 ]

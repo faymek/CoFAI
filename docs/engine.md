@@ -122,7 +122,7 @@ flowchart TB
   CLI --> BLD --> DS --> EB --> STEP --> EVA --> OUT
 ```
 
-dataset + transforms 产出 **样本 dict**（每条通常含 **`img`**、**`meta`**、若干任务 GT 键）→ **`collate_fn`** → **`EvalBatch`** → 统一 eval loop。
+dataset + transforms 统一产出 **`img`**、任务 payload 与图像 **`meta`**。例如 VQA 信息全部位于 **`vqa`** 下，语义分割和深度分别位于 **`semseg`**、**`depth`** 下。随后经 **`collate_fn`** → **`EvalBatch`** → 统一 eval loop。
 
 在 eval loop 中，每个 batch 输入 **`eval_step(...)`** 得到 **`StepOutput`**，evaluator 聚合指标并收集逐样本 **`records`**。最后汇总各任务指标落盘结果。
 
@@ -147,16 +147,16 @@ dataset + transforms 产出 **样本 dict**（每条通常含 **`img`**、**`met
 
 ### 3.3 数据处理
 
-dataset + transforms 产出 **样本 dict**（每条通常含 **`img`**、**`meta`**、若干任务 GT 键）→ **`collate_fn`** → **`EvalBatch`** → 统一 eval loop：
+dataset + transforms 产出 **样本 dict**（每条必须含 **`img`** 与 **`meta`**，并按任务 kind 携带可选 payload）→ **`collate_fn`** → **`EvalBatch`** → 统一 eval loop：
 
 EvalBatch 数据结构
 
 - **`inputs["img"]`**：批次内各样本的 **`img`**（CHW）**`stack`**（必要时 pad）→ **`[B,C,H,W]`**。
-- **`samples`**：**`len(samples)==B`**。第 **`i`** 条为去掉 **`img`** 后的样本 **`dict`**（含 **`meta`** 与各任务 GT 键）。
+- **`samples`**：**`len(samples)==B`**。第 i 条为去掉 **`img`** 后的样本，任务额外输入和标注均保留在对应 kind 下，例如 **`samples[i]["vqa"]`**。
 
 ### 3.4 模型评估
 
-第一步将数据送入模型推理， **`inference_model`**：将 **`batch.inputs["img"]`** 送入模型（**`real`** / 非 **`real`** 两条路径），得到 timing、**`bits`** 与各任务 **`task_feats`**。模型需提供 **`forward_test(...)`**（非 **`real`**）和/或 **`compress` / `decompress`**（**`real`**）等接口。
+第一步将 **`batch.inputs["img"]`** 送入模型，并按 plan 声明的 kind 从 **`batch.samples[0]`** 收集 **`task_data`**。`task_data` 只传给 `forward_test` / `decompress`，不传给 `compress`。具体模型只读取自己需要的任务额外输入；例如 Qwen3VL wrapper 只将 **`task_data["vqa"]["prompt"]`** 下传给 Qwen。
 
 第二步评估任务性能，**GT** 从 **`batch.samples[0]`** 按 **`kind`** 取**顶层键**（与数据集字段名一致）。**`pred[label]`** 由 **`task_decode_pred(task_feats[label], kind)`**得到。组装 **`pred`/`gt`** 后：若 **`samples[0]["meta"]`** 中存在 **`valid_roi`**，则仅对 **`kind=rec`** 的任务在送入 meter 前将 **`pred[label]`** 与 **`gt[label]`**（CHW）裁剪到该 ROI（动机与变换约定见 **§8**）。
 
@@ -179,9 +179,9 @@ EvalBatch 数据结构
 这里的约定在**设计思路上参考 [MMEngine](https://github.com/open-mmlab/mmengine)** 一脉的做法——用 **`dict` 表达样本、用键驱动变换与组装**，便于多任务扩展与组合；同时**实现上刻意保持简单**：评测路径只保留 **`EvalBatch`** 与薄层 **`collate_fn`**，不引入完整 Runner / Hook 体系，以降低心智负担并方便后续演进。
 
 
-1. **Dataset 返回 `dict`**：每条样本是一个映射；至少包含影像键（当前统一为 **`img`**）、**`meta`**（如路径、**`ori_size`** 等），以及各任务 GT 字段（如 **`semseg`**、**`rec`**），键名与 evaluator 的 **`kind`** / **`gt_key`** 对齐。
+1. **Dataset 返回 `dict`**：每条样本必须包含共享图像 **`img`**、仅描述图像的 **`meta`**，以及与 evaluator **`kind`** 对齐的可选任务 payload。VQA 的 prompt、question、answer、options、category 等全部位于 **`vqa`** 下。
 2. **Transforms 按 key 操作**：复合变换（如 **`PadToMultiple`**、**`ToTensor`**）通过配置里的 **`keys: [img, semseg, ...]`** 声明作用在哪些字段上，使几何与 dtype 变换在多任务键之间保持一致；输出仍是 **`dict`**，供 collate 消费。
-3. **`collate_fn` 打成 `EvalBatch`**：将 batch 内各样本的 **`img`** 堆叠为 **`inputs["img"]`**（**`[B,C,H,W]`**）；其余字段（**`meta`** 与各 GT）按样本位列成 **`samples: List[dict]`**，且其中 **不包含键 `img`**，避免与张量侧重复存储。
+3. **`collate_fn` 打成 `EvalBatch`**：无条件将每条 **`img`** 转为 CHW 并堆叠为 **`inputs["img"]`**（**`[B,C,H,W]`**）；其余任务 payload 和 **`meta`** 按样本保留在 **`samples`**。
 
 ### 5.2 EvalBatch（`inputs` + `samples`）
 
@@ -189,13 +189,13 @@ EvalBatch 数据结构
 
 | 字段 | 含义 |
 | --- | --- |
-| **`inputs`** | `Dict[str, Tensor]`。至少包含键 **`img`**，形状 **`Tensor[B,C,H,W]`**，由 collate 对各条的 **`img`**（CHW）堆叠（必要时 pad）得到。若日后有多路一致 batch 化的输入，可在此字典中增加其它 tensor 键。 |
-| **`samples`** | **`List[dict]`**，**`len(samples) == B`**。第 **`i`** 条对应 batch 中第 **`i`** 个样本，结构与 transform 后的样本 dict **对齐**，但 **不包含键 `img`**（图像仅在 **`inputs["img"][i]`**）。 |
+| **`inputs`** | `Dict[str, Any]`。所有图像任务均包含 **`img: Tensor[B,C,H,W]`**。 |
+| **`samples`** | **`List[dict]`**，**`len(samples) == B`**。每条包含任务 payload 与图像 `meta`，不再包含 `img`。 |
 
 **每条 `samples[i]` 的推荐形状**
 
 - **`meta`**：`dict`，放置 **`ori_size`**，**`img_path` / `img_name`** 等，还有一些随变换写入的辅助信息。
-- **任务 GT 键**（**与 `meta` 平级**）：如 **`semseg`**、**`cls`**、**`rec`**、**`depth`** 等，键名即 evaluator 中的 **`kind` / `gt_key`**。
+- **任务 payload 键**（**与 `meta` 平级**）：如 **`semseg`**、**`cls`**、**`rec`**、**`depth`**、**`vqa`** 等。无需额外输入的任务可直接以标注为值；VQA 等任务使用 dict 同时携带任务额外输入和评测标注。
 
 ### 5.3 StepOutput
 
@@ -214,7 +214,7 @@ EvalBatch 经过评估评估得到的中间结果：
   - **`kind` 即 `gt_key`**：数据集返回的 GT 字段名，是跨数据集统一的"模态/任务"命名（例如 `rec`、`semseg`、`edge`、`depth` 等）。
   - **`label` 即 `out_key`**：模型输出 `task_feats` 的键名。同一模态可以有多个方案或变体，通过不同的 `label` 区分（例如 `rec1`、`rec2`，其 `kind` 均为 `rec`，对应重建任务）。
   - **契约**：eval loop 从 `EvalBatch.samples[i]` 读取 kind 对应的 GT 结果，从 task_feats 中获取 label 对应的预测结果，将二者输入 meter 得到指标结果。
-  - **`kind` 的允许集合（严格模式）**：定义于 `cofai/engine/evaluator.py` 中的 `ALLOWED_KINDS`，当前包含 `rec`、`semseg`、`cls`、`depth`、`edge`、`sal`、`normals`、`scene`、`human_parts`。若不在集合内，将触发 fail-fast 报错。
+  - **`kind` 的允许集合（严格模式）**：定义于 `cofai/engine/evaluator.py` 中的 `ALLOWED_KINDS`，当前包含 `rec`、`semseg`、`cls`、`depth`、`edge`、`sal`、`normals`、`scene`、`human_parts`、`vqa`。若不在集合内，将触发 fail-fast 报错。
 
 - **既往实现的迁移说明**：
   - **重建语义（rec）**：以 `kind=rec` 标识重建模态，`label` 可自由命名（例如 `rae`）。

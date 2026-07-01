@@ -99,14 +99,14 @@ class EvalBatch:
 
     Produced by collate+pack logic (typically in `cofai.engine.dataloader`).
 
-    - ``inputs``: stacked tensors for the model; must include key ``img`` as
-      ``FloatTensor[B,C,H,W]`` (from per-sample ``image`` after collate).
+    - ``inputs``: shared model inputs; currently contains ``img`` as
+      ``FloatTensor[B,C,H,W]`` for every image task.
     - ``samples``: length ``B``; each entry matches the dataset/transform dict
-      except ``image`` is omitted (``ori_size`` etc. live under ``meta``;
-      task GT keys like ``semseg`` / ``cls`` are top-level siblings of ``meta``).
+      except ``img`` is omitted. Task-specific inputs and annotations live under
+      their task kind (for example ``samples[i]["vqa"]``).
     """
 
-    inputs: Dict[str, torch.Tensor]
+    inputs: Dict[str, Any]
     samples: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -172,4 +172,3 @@ def _validate_step_output_soft(step_output: StepOutput) -> None:
         for need in ("file", "quality", "total_enc_time", "total_dec_time", "bpp"):
             if need not in r:
                 _warn(f"record[{i}] missing field {need!r}")
-

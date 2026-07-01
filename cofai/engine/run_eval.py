@@ -14,7 +14,6 @@ import math
 import os
 import sys
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,16 +29,13 @@ from cofai.engine.config import resolve_plan, validate_plan
 from cofai.metrics.utils import DictAverageMeter
 from cofai.engine.dataloader import build_dataloader
 from cofai.engine.evaluator import MultiTaskEvaluator
+from cofai.engine.runtime import suppress_unnecessary_runtime_output
 from cofai.engine.schema import (
     EvalBatch,
     StepOutput,
     EvalResultPayload,
     _validate_step_output_soft,
 )
-
-# Disable Warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 torch.backends.cudnn.deterministic = True
 torch.set_num_threads(1)
@@ -109,13 +105,14 @@ def _bits_from_coded_data(out: Dict[str, Any]) -> Dict[str, float]:
 @torch.inference_mode()
 def inference_model(
     model: Any,
-    x: torch.Tensor,
+    x: Any,
     *,
     qp: Any = 1,
     real: bool = False,
     tasks: List[str] | None = None,
     task_specs: Any | None = None,
     profile: bool = False,
+    task_data: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
     """Single inference helper used by unified eval.
 
@@ -125,6 +122,7 @@ def inference_model(
 
     if tasks is None:
         tasks = []
+    task_data = task_data or {}
     codec_kw: Dict[str, Any] = {}
     if task_specs is not None:
         codec_kw["task_specs"] = task_specs
@@ -135,7 +133,12 @@ def inference_model(
         enc_time = time.time() - t0
 
         t1 = time.time()
-        task_feats = model.decompress(coded_data, tasks=tasks, **codec_kw)
+        task_feats = model.decompress(
+            coded_data,
+            tasks=tasks,
+            task_data=task_data,
+            **codec_kw,
+        )
         dec_time = time.time() - t1
 
         bits_items = _bits_from_coded_data(coded_data)
@@ -145,7 +148,13 @@ def inference_model(
         return time_items, bits_items, task_feats
 
     t0 = time.time()
-    coded_data, task_feats = model.forward_test(x, qp=qp, tasks=tasks, **codec_kw)
+    coded_data, task_feats = model.forward_test(
+        x,
+        qp=qp,
+        tasks=tasks,
+        task_data=task_data,
+        **codec_kw,
+    )
     elapsed = time.time() - t0
     bits_items = _bits_from_coded_data(coded_data)
     time_items = {"total_enc_time": float(elapsed) / 2.0, "total_dec_time": float(elapsed) / 2.0}
@@ -167,6 +176,9 @@ def task_decode_pred(raw: Any, task: str) -> Any:
 
     task = str(task)
     output = raw
+
+    if not isinstance(output, torch.Tensor):
+        return output
 
     if task in {"rec", "rae"}:
         # Align with common GT format (CHW).
@@ -233,10 +245,45 @@ def _label_to_kind_from_task_specs(task_specs: Any) -> Dict[str, str]:
     return m
 
 
-def _plan_label_kind_pairs(tasks: List[str], label_to_kind: Dict[str, str]) -> List[Tuple[str, str]]:
-    """(plan ``label``, dataset / codec ``kind``) for each task in order."""
+def _sample_num_pixels(sample: Dict[str, Any]) -> int:
+    meta = sample.get("meta")
+    if not isinstance(meta, dict) or "ori_size" not in meta:
+        raise KeyError("samples[i]['meta']['ori_size'] is required for eval records")
+    h, w = meta["ori_size"]
+    return max(1, int(h) * int(w))
 
-    return [(str(t), str(label_to_kind.get(str(t), str(t)))) for t in tasks]
+
+def _build_task_pair(
+    *,
+    sample: Dict[str, Any],
+    kind: str,
+    raw_feat: Any,
+) -> tuple[Any, Any]:
+    """Decode one task output and pair it with sample task data for evaluator.update()."""
+
+    if kind not in sample:
+        raise KeyError(f"Eval sample is missing task data for kind {kind!r}")
+
+    pred = _maybe_cpu_squeeze(task_decode_pred(raw_feat, kind))
+    gt = _maybe_cpu_squeeze(sample[kind])
+
+    if kind != "rec":
+        return pred, gt
+
+    roi = sample.get("meta", {}).get("valid_roi")
+    if not roi:
+        return pred, gt
+    top = int(roi["top"])
+    left = int(roi["left"])
+    rh = int(roi["height"])
+    rw = int(roi["width"])
+
+    def _crop_chw(x: Any) -> Any:
+        if isinstance(x, torch.Tensor) and x.dim() == 3:
+            return x[:, top : top + rh, left : left + rw]
+        return x
+
+    return _crop_chw(pred), _crop_chw(gt)
 
 
 def _build_per_sample_records(
@@ -249,11 +296,10 @@ def _build_per_sample_records(
 
     out: List[Dict[str, Any]] = []
     for i, sample in enumerate(samples):
-        meta = sample["meta"]
-        h, w = meta["ori_size"]
-        npx = h * w
+        npx = _sample_num_pixels(sample)
         bpp_items = {f"bpp_{k}": float(v) / float(npx) for k, v in bits_items.items()}
         bpp_items = {"bpp": float(sum(bpp_items.values())), **bpp_items}
+        meta = sample["meta"]
         file = meta.get("img_path") or meta.get("img_name") or f"sample_{i}"
         out.append({"file": file, "quality": quality, **time_items, **bpp_items})
     return out
@@ -263,7 +309,7 @@ def eval_step(
     *,
     model: Any,
     batch: EvalBatch,
-    step_ctx: Optional[Dict[str, Any]] = {},
+    step_ctx: Optional[Dict[str, Any]] = None,
 ) -> StepOutput:
     """Default `test_step` for DataUnitCodec-style models.
 
@@ -274,20 +320,29 @@ def eval_step(
     if not isinstance(batch, EvalBatch):
         raise TypeError(f"Expected EvalBatch from collate, got {type(batch)!r}")
 
+    step_ctx = step_ctx or {}
     cfg = step_ctx["cfg"]
     tasks = list(step_ctx["tasks"])
     device = step_ctx["device"]
     task_specs = step_ctx.get("task_specs")
     label_to_kind = _label_to_kind_from_task_specs(task_specs)
+    pairs = [(str(task), str(label_to_kind.get(str(task), str(task)))) for task in tasks]
 
-    img = batch.inputs["img"].to(device, non_blocking=True)
-
-    bs = int(img.size(0))
+    bs = len(batch.samples)
     if bs != 1:
         raise ValueError(
             f"Current eval step only supports batch size = 1, got batch size {bs}."
         )
 
+    if "img" not in batch.inputs:
+        raise KeyError("EvalBatch.inputs must contain the shared `img` field.")
+    img = batch.inputs["img"].to(device, non_blocking=True)
+    sample0 = batch.samples[0]
+    kinds = dict.fromkeys(kind for _label, kind in pairs)
+    missing_task_data = [kind for kind in kinds if kind not in sample0]
+    if missing_task_data:
+        raise KeyError(f"Eval sample is missing task data: {missing_task_data!r}")
+    task_data = {kind: sample0[kind] for kind in kinds}
     time_items, bits_items, task_feats = inference_model(
         model,
         img,
@@ -295,7 +350,8 @@ def eval_step(
         real=cfg.args.real,
         tasks=tasks,
         task_specs=task_specs,
-        profile=bool(cfg.args.profile),
+        profile=bool(getattr(cfg.args, "profile", False)),
+        task_data=task_data,
     )
 
     missing = [t for t in tasks if t not in (task_feats or {})]
@@ -318,32 +374,19 @@ def eval_step(
         for rec in per_sample_records:
             rec["bpfp"] = bpfp
 
-    pairs = _plan_label_kind_pairs(tasks, label_to_kind)
-    pred = {
-        label: _maybe_cpu_squeeze(task_decode_pred(task_feats[label], kind))
-        for label, kind in pairs
-    }
-    t0 = batch.samples[0]
-    gt = {
-        label: _maybe_cpu_squeeze(t0[kind]) for label, kind in pairs
-    }
+    record0 = per_sample_records[0]
+    pred: Dict[str, Any] = {}
+    gt: Dict[str, Any] = {}
+    for label, kind in pairs:
+        pred[label], gt[label] = _build_task_pair(
+            sample=sample0,
+            kind=kind,
+            raw_feat=task_feats[label],
+        )
 
-    roi = t0["meta"].get("valid_roi")
-    if roi:
-        top = int(roi["top"])
-        left = int(roi["left"])
-        rh = int(roi["height"])
-        rw = int(roi["width"])
-
-        def _crop_chw(x: Any) -> Any:
-            if isinstance(x, torch.Tensor) and x.dim() == 3:
-                return x[:, top : top + rh, left : left + rw]
-            return x
-
-        for label, kind in pairs:
-            if kind == "rec":
-                pred[label] = _crop_chw(pred[label])
-                gt[label] = _crop_chw(gt[label])
+    if "vqa" in task_data:
+        record0.update(task_data["vqa"])
+        record0["prediction"] = pred["vqa"]
 
     return StepOutput(
         timing=time_items,
@@ -375,7 +418,7 @@ def eval_loop(
             _validate_step_output_soft(step_out)
             for record in step_out.per_sample_records or []:
                 records.append(dict(record))
-            bs = int(batch.inputs["img"].size(0))
+            bs = len(batch.samples)
             seen_samples += bs
             pbar.update(bs)
             if max_samples and max_samples > 0 and seen_samples >= max_samples:
@@ -466,6 +509,25 @@ def _group_codec_keys(summary: Dict[str, Any]) -> Dict[str, Any]:
             ordered[k] = codec.pop(k)
     ordered.update(codec)
     return ordered
+
+
+def _print_complexity_summary(summary: Dict[str, Any]) -> None:
+    if "codec_params" in summary:
+        if summary["codec_params"] == 0:
+            print("[complexity] codec params: 0 (bypass)")
+        else:
+            print(f"[complexity] codec params: {summary['codec_params'] / 1e6:.2f} M")
+
+    bypass = summary.get("codec_params") == 0
+    for key, label in (("codec_enc_flops", "enc"), ("codec_dec_flops", "dec")):
+        if key not in summary:
+            continue
+        if summary[key] == 0 and bypass:
+            print(f"[complexity] codec {label} FLOPs: 0 (bypass)")
+        elif summary[key] == 0:
+            print(f"[complexity] codec {label} FLOPs: 0")
+        else:
+            print(f"[complexity] codec {label} FLOPs: {summary[key] / 1e9:.2f} G")
 
 
 def finalize_results(
@@ -562,21 +624,7 @@ def run_eval(
     summary.update(complexity)
     summary = _group_codec_keys(summary)
 
-    if "codec_params" in summary:
-        if summary["codec_params"] == 0:
-            print("[complexity] codec params: 0 (bypass)")
-        else:
-            print(f"[complexity] codec params: {summary['codec_params'] / 1e6:.2f} M")
-    bypass = summary.get("codec_params") == 0
-    for key, label in (("codec_enc_flops", "enc"), ("codec_dec_flops", "dec")):
-        if key not in summary:
-            continue
-        if summary[key] == 0 and bypass:
-            print(f"[complexity] codec {label} FLOPs: 0 (bypass)")
-        elif summary[key] == 0:
-            print(f"[complexity] codec {label} FLOPs: 0")
-        else:
-            print(f"[complexity] codec {label} FLOPs: {summary[key] / 1e9:.2f} G")
+    _print_complexity_summary(summary)
 
     run_name = str(plan_cfg.name)
     description = str(plan_cfg.description)
@@ -587,19 +635,15 @@ def run_eval(
     )
 
     if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-        canonical_path = os.path.join(output_dir, "result.json")
-        payload: EvalResultPayload = {
-            "name": run_name,
-            "description": description,
-            "results": summary,
-            "quality": result_quality,
-            "records": records,
-        }
-        with open(canonical_path, "w", encoding="utf-8") as file_obj:
-            json.dump(payload, file_obj, indent=2, ensure_ascii=False)
-        with open(os.path.join(output_dir, "config.yaml"), "w", encoding="utf-8") as f:
-            f.write(OmegaConf.to_yaml(cfg, resolve=True))
+        canonical_path = write_eval_outputs(
+            output_dir,
+            name=run_name,
+            description=description,
+            results=summary,
+            quality=result_quality,
+            records=records,
+            cfg=cfg,
+        )
         print(f"Results saved to: {canonical_path}")
         print("results:\n" + json.dumps(summary, indent=2, ensure_ascii=False))
 
@@ -608,8 +652,6 @@ def run_eval(
 
 def multi_run(cfg: Any):
     """Each ``cfg.multi_run`` key → one ``run_eval``; aggregate ``summary.json``."""
-    from omegaconf import OmegaConf, open_dict
-
     if not cfg.args.multi_run or not cfg.multi_run:
         return run_eval(cfg)
 
@@ -679,6 +721,7 @@ def _hydra_cli(cfg: DictConfig) -> None:
     OmegaConf.set_struct(cfg, False)
     with open_dict(cfg):
         cfg.PROJECT_ROOT = os.environ.get("PROJECT_ROOT")
+    suppress_unnecessary_runtime_output(verbose=bool(cfg.args.verbose))
     cfg.args.device = "cuda" if cfg.args.cuda else "cpu"
     OmegaConf.set_struct(cfg, True)
     multi_run(cfg)

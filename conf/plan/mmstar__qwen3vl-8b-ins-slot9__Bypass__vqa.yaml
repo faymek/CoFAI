@@ -1,0 +1,38 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: mmstar__qwen3vl-8b-ins-slot9__Bypass__vqa
+description: "data: MMStar; model: Qwen3vlFeatureCodecModel + Bypass; task: multiple-choice accuracy"
+
+dataset:
+  type: MMStarDataset
+  data_path: ${PROJECT_ROOT}/data/MMStar.tsv
+  prompt_suffix: "Please select the correct answer from the options above.\nYou MUST reply with one single letter (A/B/C/D) with no explanation."
+
+task_configs:
+  - label: vqa
+    kind: vqa
+    meter:
+      type: MMStarAccuracyMetric
+
+model:
+  type: Qwen3vlFeatureCodecModel
+  qwen_backbone:
+    type: cofai.backbone.Qwen3VLBackbone
+    model_path: Qwen/Qwen3-VL-8B-Instruct
+    dtype: bfloat16
+    min_pixels: 602112
+    max_pixels: 1204224
+    max_new_tokens: 512
+    do_sample: false
+    slot: 9
+  qwen_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+
+args:
+  real: false
+  verbose: false
+  output_dir: ${PROJECT_ROOT}/logs
