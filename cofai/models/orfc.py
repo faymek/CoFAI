@@ -2,8 +2,12 @@
 ORFC (Optimized Rotation for Feature Compression) models for CoFAI engine.
 
 Provides two model classes:
-- Dinov2ClsORFC: DINOv2 backbone + ORFC for classification
-- Dinov2SlideSegORFC: DINOv2 backbone + ORFC with sliding window for segmentation
+- Dinov2ClsORFC: DINOv2 backbone + ORFC/SoftPQ for classification
+- Dinov2SlideSegORFC: DINOv2 backbone + ORFC/SoftPQ with sliding window for segmentation
+
+Supports two codec types:
+- "orfc": Standard OPQ with fixed rotation + codebooks (.npz weights)
+- "soft_pq": Differentiable Soft-PQ with learned rotation + codebooks (.pt checkpoint)
 """
 
 import itertools
@@ -214,25 +218,73 @@ class _ORFCMixin:
         return tokens_hat
 
 
-@register_model("Dinov2ClsORFC")
-class Dinov2ClsORFC(CompressionModel, _ORFCMixin):
-    """DINOv2 backbone + ORFC for classification.
+class _SoftPQMixin:
+    """Shared Soft-PQ encode/decode logic using FeatureCodec (.pt checkpoint).
 
-    Compresses intermediate ViT features using Optimized Product Quantization,
-    then continues through remaining backbone blocks and classification head.
+    Handles:
+    - Loading .pt checkpoint (FeatureCodec = OrthogonalTransform + SoftPQ)
+    - Codec quantization: normalize → rotate → PQ → inverse rotate → denormalize
+    - Rate computation via learned prior or fixed ceiling
+    """
+
+    def _init_soft_pq(self, codec_path, device="cuda"):
+        """Load trained FeatureCodec from .pt checkpoint."""
+        from cofai.entropy_models.soft_pq import load_codec
+        self._codec = load_codec(codec_path, device=device)
+        self._codec.eval()
+        pq = self._codec.pq
+        self._spq_G = pq.G
+        self._spq_K = pq.K
+        self._spq_d = pq.d
+
+    def _soft_pq_encode_decode(self, tokens):
+        """Apply FeatureCodec: normalize → codec → denormalize.
+
+        Args:
+            tokens: (B, N, D) tensor of feature tokens
+
+        Returns:
+            tokens_hat: (B, N, D) reconstructed tokens
+            usage: (G, K) usage counts
+        """
+        Y, mu, std = batch_normalize_gpu(tokens, mode="per_image")
+        Y_hat, usage = self._codec(Y)
+        tokens_hat = batch_inv_normalize_gpu(Y_hat, mu, std)
+        return tokens_hat, usage
+
+    def _soft_pq_actual_bits(self, tokens):
+        """Compute rate: rANS bits if available, else cross-entropy estimate."""
+        B, N, D = tokens.shape
+        pq = self._codec.pq
+        if pq.use_rate and pq._last_rate is not None:
+            return pq._last_rate.item() * N
+        return float(N * self._spq_G * math.log2(self._spq_K))
+
+
+@register_model("Dinov2ClsORFC")
+class Dinov2ClsORFC(CompressionModel, _ORFCMixin, _SoftPQMixin):
+    """DINOv2 backbone + ORFC/SoftPQ for classification.
+
+    Compresses intermediate ViT features using standard OPQ (.npz) or
+    trained Soft-PQ FeatureCodec (.pt), then continues through remaining
+    backbone blocks and classification head.
 
     Args:
         dino_backbone (dict): Configuration for Dinov2OrgBackbone.
-        orfc_weights_path (str): Path to .npz file with R, codebooks, pmf.
-        K (int): Codebook size per group.
-        embedding_dim (int): Sub-vector dimension.
+        codec_type (str): "orfc" for standard OPQ or "soft_pq" for FeatureCodec.
+        orfc_weights_path (str): Path to .npz file (codec_type="orfc").
+        codec_path (str): Path to .pt FeatureCodec checkpoint (codec_type="soft_pq").
+        K (int): Codebook size per group (codec_type="orfc" only).
+        embedding_dim (int): Sub-vector dimension (codec_type="orfc" only).
         heads (dict, optional): Task head configurations.
     """
 
     def __init__(
         self,
         dino_backbone={},
+        codec_type="orfc",
         orfc_weights_path="",
+        codec_path="",
         K=256,
         embedding_dim=32,
         heads: dict | None = None,
@@ -241,8 +293,15 @@ class Dinov2ClsORFC(CompressionModel, _ORFCMixin):
         super().__init__()
         self.dino = Dinov2OrgBackbone(**dino_backbone)
         self.patch_size = self.dino.patch_size
+        self.codec_type = codec_type
 
-        self._init_orfc(orfc_weights_path, K, embedding_dim)
+        if codec_type == "orfc":
+            self._init_orfc(orfc_weights_path, K, embedding_dim)
+        elif codec_type == "soft_pq":
+            device = dino_backbone.get("device", "cuda")
+            self._init_soft_pq(codec_path, device=device)
+        else:
+            raise ValueError(f"Unknown codec_type: {codec_type}")
 
         self.heads = nn.ModuleDict()
         if heads:
@@ -257,10 +316,16 @@ class Dinov2ClsORFC(CompressionModel, _ORFCMixin):
         raise NotImplementedError("Inference-only model.")
 
     def forward_test(self, x, qp=None, tasks=[], **kwargs):
-        """Forward pass: encode → ORFC → decode → head."""
+        """Forward pass: encode → ORFC/SoftPQ → decode → head."""
         with torch.inference_mode():
             h = self.dino.encode(x)  # (B, 1+HW, D)
-            h_hat, labels = self._orfc_encode_decode(h)
+
+            if self.codec_type == "soft_pq":
+                h_hat, usage = self._soft_pq_encode_decode(h)
+                bits = self._soft_pq_actual_bits(h)
+            else:
+                h_hat, labels = self._orfc_encode_decode(h)
+                bits = self._orfc_actual_bits(labels)
 
             task_feats = {}
             if "cls" in tasks:
@@ -269,65 +334,77 @@ class Dinov2ClsORFC(CompressionModel, _ORFCMixin):
                     task_feats["cls"] = self.heads["cls"](cls_features)
 
             coded_data = {
-                "bits": {"orfc": self._orfc_actual_bits(labels)},
+                "bits": {"orfc": bits},
             }
             return coded_data, task_feats
 
     def compress(self, x, qp=None, tasks=[], **kwargs):
-        """Real compression: encode → ORFC → rANS encode."""
+        """Real compression: encode → codec → encode bitstream."""
         with torch.inference_mode():
             h = self.dino.encode(x)  # (B, 1+HW, D)
             B, N, D = h.shape
 
-            Y, mu, std = batch_normalize_gpu(h, mode="per_image")
-            flat = Y.reshape(B * N, D)
-            Z = flat @ self._orfc_R
-
-            z_3d = Z.reshape(B * N, self._orfc_num_groups, self._orfc_embedding_dim)
-            z_3d = z_3d.permute(1, 0, 2).contiguous()
-
-            _, labels = batched_assign(z_3d, self._orfc_codebooks, device=h.device)
-
-            byte_strings = self._orfc_rans_encode(labels)
-            if byte_strings is not None:
-                total_bits = sum(len(s) for s in byte_strings) * 8.0
+            if self.codec_type == "soft_pq":
+                h_hat, usage = self._soft_pq_encode_decode(h)
+                bits = self._soft_pq_actual_bits(h)
                 coded_data = {
-                    "bits": {"orfc": total_bits},
-                    "pstate": {
-                        "shape": (B, N, D),
-                        "mu": mu.cpu(),
-                        "std": std.cpu(),
-                        "byte_strings": byte_strings,
-                    },
+                    "bits": {"orfc": bits},
+                    "pstate": {"h_hat": h_hat},
                 }
             else:
-                total_bits = self._orfc_actual_bits(labels)
-                coded_data = {
-                    "bits": {"orfc": total_bits},
-                    "pstate": {
-                        "shape": (B, N, D),
-                        "mu": mu.cpu(),
-                        "std": std.cpu(),
-                        "labels": labels.cpu(),
-                    },
-                }
+                Y, mu, std = batch_normalize_gpu(h, mode="per_image")
+                flat = Y.reshape(B * N, D)
+                Z = flat @ self._orfc_R
+
+                z_3d = Z.reshape(B * N, self._orfc_num_groups, self._orfc_embedding_dim)
+                z_3d = z_3d.permute(1, 0, 2).contiguous()
+
+                _, labels = batched_assign(z_3d, self._orfc_codebooks, device=h.device)
+
+                byte_strings = self._orfc_rans_encode(labels)
+                if byte_strings is not None:
+                    total_bits = sum(len(s) for s in byte_strings) * 8.0
+                    coded_data = {
+                        "bits": {"orfc": total_bits},
+                        "pstate": {
+                            "shape": (B, N, D),
+                            "mu": mu.cpu(),
+                            "std": std.cpu(),
+                            "byte_strings": byte_strings,
+                        },
+                    }
+                else:
+                    total_bits = self._orfc_actual_bits(labels)
+                    coded_data = {
+                        "bits": {"orfc": total_bits},
+                        "pstate": {
+                            "shape": (B, N, D),
+                            "mu": mu.cpu(),
+                            "std": std.cpu(),
+                            "labels": labels.cpu(),
+                        },
+                    }
             return coded_data
 
     def decompress(self, coded_unit, tasks=[], **kwargs):
-        """Decompress: rANS decode → PQ lookup → inverse rotate → head."""
+        """Decompress: decode bitstream → reconstruct → head."""
         pstate = coded_unit["pstate"]
-        B, N, D = pstate["shape"]
-        device = self._orfc_R.device
-        mu = pstate["mu"].to(device)
-        std = pstate["std"].to(device)
 
-        if "byte_strings" in pstate:
-            byte_strings = pstate["byte_strings"]
-            labels = self._orfc_rans_decode(byte_strings, B * N)
+        if self.codec_type == "soft_pq":
+            tokens_hat = pstate["h_hat"]
         else:
-            labels = pstate["labels"].to(device)
+            B, N, D = pstate["shape"]
+            device = self._orfc_R.device
+            mu = pstate["mu"].to(device)
+            std = pstate["std"].to(device)
 
-        tokens_hat = self._orfc_decode_from_labels(labels, mu, std, B, N)
+            if "byte_strings" in pstate:
+                byte_strings = pstate["byte_strings"]
+                labels = self._orfc_rans_decode(byte_strings, B * N)
+            else:
+                labels = pstate["labels"].to(device)
+
+            tokens_hat = self._orfc_decode_from_labels(labels, mu, std, B, N)
 
         task_feats = {}
         if "cls" in tasks:
@@ -350,12 +427,12 @@ class Dinov2ClsORFC(CompressionModel, _ORFCMixin):
 
 
 @register_model("Dinov2SlideSegORFC")
-class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
-    """DINOv2 backbone + ORFC with sliding window for segmentation.
+class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin, _SoftPQMixin):
+    """DINOv2 backbone + ORFC/SoftPQ with sliding window for segmentation.
 
     Processes large images via sliding window crops. Each crop is independently:
     1. Encoded through backbone blocks[:slot]
-    2. ORFC quantized (with per-crop normalization)
+    2. ORFC/SoftPQ quantized (with per-crop normalization)
     3. Continued through blocks[slot:] + norm
     4. Passed to segmentation head
 
@@ -363,9 +440,11 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
 
     Args:
         dino_backbone (dict): Configuration for Dinov2OrgBackbone.
-        orfc_weights_path (str): Path to .npz file with R, codebooks, pmf.
-        K (int): Codebook size per group.
-        embedding_dim (int): Sub-vector dimension.
+        codec_type (str): "orfc" for standard OPQ or "soft_pq" for FeatureCodec.
+        orfc_weights_path (str): Path to .npz file (codec_type="orfc").
+        codec_path (str): Path to .pt FeatureCodec checkpoint (codec_type="soft_pq").
+        K (int): Codebook size per group (codec_type="orfc" only).
+        embedding_dim (int): Sub-vector dimension (codec_type="orfc" only).
         slide_size (list): Sliding window crop size [H, W].
         slide_stride (list): Sliding window stride [H, W].
         heads (dict, optional): Task head configurations.
@@ -374,7 +453,9 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
     def __init__(
         self,
         dino_backbone={},
+        codec_type="orfc",
         orfc_weights_path="",
+        codec_path="",
         K=256,
         embedding_dim=32,
         slide_size=(512, 512),
@@ -387,8 +468,15 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
         self.patch_size = self.dino.patch_size
         self.slide_size = tuple(slide_size)
         self.slide_stride = tuple(slide_stride)
+        self.codec_type = codec_type
 
-        self._init_orfc(orfc_weights_path, K, embedding_dim)
+        if codec_type == "orfc":
+            self._init_orfc(orfc_weights_path, K, embedding_dim)
+        elif codec_type == "soft_pq":
+            device = dino_backbone.get("device", "cuda")
+            self._init_soft_pq(codec_path, device=device)
+        else:
+            raise ValueError(f"Unknown codec_type: {codec_type}")
 
         self.heads = nn.ModuleDict()
         if heads:
@@ -474,12 +562,17 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
             padded_crop = self._center_pad(crop_img)
 
             h = self.dino.encode(padded_crop)  # (1, 1+N, D)
-            h_hat, labels = self._orfc_encode_decode(h)
+
+            if self.codec_type == "soft_pq":
+                h_hat, usage = self._soft_pq_encode_decode(h)
+                total_bits += self._soft_pq_actual_bits(h)
+            else:
+                h_hat, labels = self._orfc_encode_decode(h)
+                total_bits += self._orfc_actual_bits(labels)
+                all_labels.append(labels)
 
             n_tokens = h.shape[1]
             total_tokens += n_tokens
-            total_bits += self._orfc_actual_bits(labels)
-            all_labels.append(labels)
 
             dino = self.dino.model
             x_dec = h_hat
@@ -536,7 +629,23 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
             return coded_data, task_feats
 
     def compress(self, x, qp=None, tasks=[], **kwargs):
-        """Real compression with rANS encoding per crop."""
+        """Real compression with encoding per crop."""
+        with torch.inference_mode():
+            if self.codec_type == "soft_pq":
+                return self._compress_soft_pq(x, tasks=tasks, **kwargs)
+            return self._compress_orfc(x, tasks=tasks, **kwargs)
+
+    def _compress_soft_pq(self, x, tasks=[], **kwargs):
+        """SoftPQ compress: slide → codec → forward_test equivalent."""
+        preds, total_bits, _ = self._slide_seg_inference(x)
+        coded_data = {
+            "bits": {"orfc": total_bits},
+            "pstate": {"preds": preds},
+        }
+        return coded_data
+
+    def _compress_orfc(self, x, tasks=[], **kwargs):
+        """Standard ORFC compress with rANS encoding per crop."""
         with torch.inference_mode():
             B, C, h_img, w_img = x.shape
             crops = self._get_slide_crops(h_img, w_img)
@@ -591,8 +700,15 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
             return coded_data
 
     def decompress(self, coded_unit, tasks=[], **kwargs):
-        """Decompress: per-crop rANS decode → reconstruct → seg head → fuse."""
+        """Decompress: decode → reconstruct → seg head → fuse."""
         pstate = coded_unit["pstate"]
+
+        if self.codec_type == "soft_pq":
+            task_feats = {}
+            if "semseg" in tasks and pstate.get("preds") is not None:
+                task_feats["semseg"] = pstate["preds"]
+            return task_feats
+
         crops = pstate["crops"]
         shapes = pstate["shapes"]
         mu_list = pstate["mu_list"]

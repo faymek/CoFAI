@@ -8,6 +8,11 @@
 /models/
 /logs/
 /runs/
+/eval_results/
+/outputs/
+/results/
+/scripts/
+.venv-*/
 
 
 # Created by https://www.toptal.com/developers/gitignore/api/python

@@ -7,6 +7,10 @@ from .orfc_model import (
     batched_kmeans, batched_assign,
     learn_pca_rotation, learn_orfc_rotation,
 )
+from .soft_pq import (
+    FeatureTransform, OrthogonalTransform, SoftPQ, FeatureCodec,
+    FrozenTail, train_soft_pq, soft_pq_encode_decode, save_codec, load_codec,
+)
 
 __all__ = [
     "SoftmaxPrior",
@@ -25,4 +29,13 @@ __all__ = [
     "batched_assign",
     "learn_pca_rotation",
     "learn_orfc_rotation",
+    "FeatureTransform",
+    "OrthogonalTransform",
+    "SoftPQ",
+    "FeatureCodec",
+    "FrozenTail",
+    "train_soft_pq",
+    "soft_pq_encode_decode",
+    "save_codec",
+    "load_codec",
 ]

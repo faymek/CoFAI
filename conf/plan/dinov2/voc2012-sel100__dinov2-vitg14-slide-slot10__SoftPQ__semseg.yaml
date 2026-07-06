@@ -1,0 +1,68 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: voc2012_sel100
+  - /heads: dinov2_head
+  - /metrics:
+    - voc2012_seg_metrics
+  - _self_
+
+name: voc2012-sel100__dinov2-vitg14-slide-slot10__SoftPQ__semseg
+description: "Data: VOC2012 sel100; Model: DINOv2 ViT-G14/14 slide; Codec: SoftPQ blk09; Task: semantic segmentation"
+dataset: ${datasets.voc2012_sel100}
+test_transforms:
+  - type: cofai.transforms.ResizeImage
+    size: [518]
+    keys: [img]
+  - type: cofai.transforms.ResizeImage
+    size: [518]
+    keys: [semseg]
+    interpolation: NEAREST
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    kind: semseg
+    meter: ${metrics.voc2012_seg_metrics}
+model:
+  type: DinoSlideFeatureCodecModel
+  slide_size: [518, 518]
+  slide_stride: [518, 518]
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: giant
+    img_size: 518
+    patch_size: 14
+    dynamic_size: false
+    slot: 10  # encode blocks[:10] ("blk09")
+    n_last_blocks: 1
+  dino_codec:
+    type: cofai.latent_codecs.SoftPQFeatureCodec
+    codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk09_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+  heads:
+    semseg: ${heads.voc2012_seg_giant_last1}
+
+multi_run:
+  4:
+    model:
+      dino_codec:
+        codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk09_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+  8:
+    model:
+      dino_codec:
+        codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk09_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+  16:
+    model:
+      dino_codec:
+        codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk09_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+  64:
+    model:
+      dino_codec:
+        codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk09_K64_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+  256:
+    model:
+      dino_codec:
+        codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk09_K256_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt

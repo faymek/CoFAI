@@ -6,12 +6,14 @@ from .mlore_codec import MLoREFeatureCodec, MLoREFeatureCodecLight
 from .bypass import BypassLatentCodec
 from .vqfc import VQFeatureCodec
 from .orfc import OrthoRotationFeatureCodec
+from .soft_pq import SoftPQFeatureCodec
 
 __all__ = [
     "FeatureScaleHyperprior",
     "BypassLatentCodec",
     "VQFeatureCodec",
     "OrthoRotationFeatureCodec",
+    "SoftPQFeatureCodec",
     "VitUnionLatentCodec",
     "VitUnionLatentCodecWithCtx",
     "VitSeparateLatentCodec",
