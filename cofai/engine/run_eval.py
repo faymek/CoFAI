@@ -628,9 +628,12 @@ def run_eval(
 
     run_name = str(plan_cfg.name)
     description = str(plan_cfg.description)
+    explicit_subdir = str(getattr(cfg.args, "result_subdir", "") or "").strip()
     output_dir = (
         write_subdir
         if write_subdir is not None
+        else explicit_subdir
+        if explicit_subdir
         else os.path.join(str(cfg.args.output_dir or "").strip() or "logs", run_name)
     )
 

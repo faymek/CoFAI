@@ -7,6 +7,7 @@ args:
   profile: false
   device: cpu
   output_dir: ""
+  result_subdir: ""
   quality: 0
   max_samples: null
   multi_run: false

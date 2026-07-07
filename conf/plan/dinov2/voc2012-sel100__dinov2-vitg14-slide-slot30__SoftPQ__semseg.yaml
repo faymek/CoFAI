@@ -39,6 +39,7 @@ model:
     dynamic_size: false
     slot: 30  # encode blocks[:30] ("blk29")
     n_last_blocks: 1
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov2/backbone/dinov2_vitg14_pretrain.pth
   dino_codec:
     type: cofai.latent_codecs.SoftPQFeatureCodec
     codec_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitg14/blk29_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt

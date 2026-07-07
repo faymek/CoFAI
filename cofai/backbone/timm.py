@@ -128,16 +128,74 @@ class Dinov2TimmBackbone(nn.Module):
         if self.with_registers:
             model_name = f"vit_{self.model_size}_patch14_reg4_dinov2.lvd142m"
 
-        feature_model = timm.create_model(
-            model_name,
-            pretrained=True,
-            img_size=self.img_size,
-            patch_size=self.patch_size,
-            drop_path_rate=0.0,
-            dynamic_img_size=self.dynamic_size,
-        )
+        if self.ckpt_path is not None:
+            ckpt_path = os.path.expanduser(str(self.ckpt_path))
+            if not os.path.isfile(ckpt_path):
+                raise FileNotFoundError(f"Local checkpoint not found: {ckpt_path}")
+            feature_model = timm.create_model(
+                model_name,
+                pretrained=False,
+                img_size=self.img_size,
+                patch_size=self.patch_size,
+                drop_path_rate=0.0,
+                dynamic_img_size=self.dynamic_size,
+            )
+            state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+            state_dict.pop("mask_token", None)
+            self._adapt_state_dict(feature_model, state_dict)
+            result = feature_model.load_state_dict(state_dict, strict=False)
+            if result.missing_keys:
+                raise RuntimeError(
+                    f"Missing keys loading DINOv2 checkpoint: {result.missing_keys[:10]}"
+                )
+        else:
+            feature_model = timm.create_model(
+                model_name,
+                pretrained=True,
+                img_size=self.img_size,
+                patch_size=self.patch_size,
+                drop_path_rate=0.0,
+                dynamic_img_size=self.dynamic_size,
+            )
         feature_model.eval()
         return feature_model
+
+    @staticmethod
+    def _adapt_state_dict(model, state_dict):
+        """Adapt checkpoint state_dict to match timm model expectations.
+
+        Handles:
+        - pos_embed interpolation when resolution differs
+        - SwiGLU MLP key renaming (w12/w3 -> fc1/fc2) for ViT-G
+        """
+        # --- SwiGLU MLP key renaming (facebook DINOv2-G uses w12/w3) ---
+        keys_to_rename = []
+        for k in list(state_dict.keys()):
+            if ".mlp.w12." in k:
+                keys_to_rename.append((k, k.replace(".mlp.w12.", ".mlp.fc1.")))
+            elif ".mlp.w3." in k:
+                keys_to_rename.append((k, k.replace(".mlp.w3.", ".mlp.fc2.")))
+        for old_key, new_key in keys_to_rename:
+            state_dict[new_key] = state_dict.pop(old_key)
+
+        # --- pos_embed interpolation ---
+        if "pos_embed" not in state_dict:
+            return
+        model_shape = model.pos_embed.shape
+        ckpt_pe = state_dict["pos_embed"]
+        if ckpt_pe.shape[1] == model_shape[1]:
+            return
+        cls_pos = ckpt_pe[:, :1, :]
+        patch_pos = ckpt_pe[:, 1:, :]
+        num_patches_model = model_shape[1] - 1
+        gs_ckpt = int(patch_pos.shape[1] ** 0.5)
+        gs_model = int(num_patches_model ** 0.5)
+        patch_pos = patch_pos.reshape(1, gs_ckpt, gs_ckpt, -1).permute(0, 3, 1, 2)
+        patch_pos = torch.nn.functional.interpolate(
+            patch_pos, size=(gs_model, gs_model), mode="bicubic", align_corners=False
+        )
+        patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(1, gs_model * gs_model, -1)
+        state_dict["pos_embed"] = torch.cat([cls_pos, patch_pos], dim=1)
 
     def forward(self, x, task="whole"):
         """Forward pass through the backbone.
