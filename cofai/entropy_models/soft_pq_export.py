@@ -30,16 +30,18 @@ def parse_layer_from_stem(stem: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def extract_npz_arrays(codec) -> Tuple[np.ndarray, np.ndarray]:
-    """Extract ``R`` (D,D) and ``codebooks`` (G,K,d) from a FeatureCodec."""
+def extract_npz_arrays(codec) -> Tuple[Optional[np.ndarray], np.ndarray]:
+    """Extract ``codebooks`` (G,K,d) and optional ``R`` (D,D) from a FeatureCodec."""
+    codebooks = codec.pq.codebooks.detach().cpu().numpy()
     transform = codec.transform
-    if transform is None or not hasattr(transform, "get_rotation"):
+    if transform is None:
+        return None, codebooks
+    if not hasattr(transform, "get_rotation"):
         raise ValueError(
-            "NPZ export requires OrthogonalTransform; "
-            f"got {type(transform).__name__ if transform else None}"
+            "NPZ export requires OrthogonalTransform for R; "
+            f"got {type(transform).__name__}"
         )
     R = transform.get_rotation().detach().cpu().numpy()
-    codebooks = codec.pq.codebooks.detach().cpu().numpy()
     return R, codebooks
 
 
@@ -49,20 +51,34 @@ def compute_histogram_pmf(
     features: Sequence[np.ndarray],
     *,
     norm_mode: str = "per_image",
+    n_prefix: int = 0,
     device: Union[str, torch.device] = "cuda",
     batch_size: int = 200,
+    token_slice: str = "all",
 ) -> np.ndarray:
-    """Count label histogram on train features; return ``pmf`` (G, K)."""
+    """Count label histogram on train features; return ``pmf`` (G, K).
+
+    Args:
+        token_slice: ``'all'`` (default) or ``'patch'`` (skip first ``n_prefix`` tokens).
+    """
     codec.eval()
     pq = codec.pq
     G, K = pq.G, pq.K
     label_counts = np.zeros((G, K), dtype=np.int64)
+    patch_only = token_slice == "patch" and n_prefix > 0
 
     for start in range(0, len(features), batch_size):
         end = min(start + batch_size, len(features))
-        X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
-        Y, _, _ = batch_normalize_gpu(X, mode=norm_mode)
-        _ = codec(Y)
+        if isinstance(features, np.ndarray):
+            batch = features[start:end]
+        else:
+            batch = np.stack(features[start:end])
+        X = torch.from_numpy(batch).float().to(device)
+        Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
+        if patch_only:
+            _ = codec(Y[:, n_prefix:, :])
+        else:
+            _ = codec(Y)
         labels = pq._last_labels.cpu().numpy()
         for g in range(G):
             for lbl in labels[g]:
@@ -82,14 +98,18 @@ def save_codec_npz(
     *,
     source_pt: Optional[Union[str, Path]] = None,
 ) -> Path:
-    """Write ORFC-compatible ``.npz`` with ``R``, ``codebooks``, ``pmf``."""
+    """Write sidecar ``.npz`` with ``codebooks``, ``pmf``, and optional ``R``."""
     R, codebooks = extract_npz_arrays(codec)
     npz_path = Path(npz_path)
     npz_path.parent.mkdir(parents=True, exist_ok=True)
-    meta = {}
+    payload = {"codebooks": codebooks, "pmf": pmf}
+    if R is not None:
+        payload["R"] = R
+    else:
+        payload["use_transform"] = np.bool_(False)
     if source_pt is not None:
-        meta["source_pt"] = str(source_pt)
-    np.savez(npz_path, R=R, codebooks=codebooks, pmf=pmf, **meta)
+        payload["source_pt"] = str(source_pt)
+    np.savez(npz_path, **payload)
     return npz_path
 
 

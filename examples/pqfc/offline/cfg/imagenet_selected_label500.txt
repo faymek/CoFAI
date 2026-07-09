@@ -1,0 +1,1 @@
+../../../orfc/offline/cfg/imagenet_selected_label500.txt

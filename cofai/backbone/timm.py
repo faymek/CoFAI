@@ -762,15 +762,18 @@ class Dinov3TimmBackbone(nn.Module):
             if not os.path.isfile(ckpt_path):
                 raise FileNotFoundError(f"Local checkpoint not found: {ckpt_path}")
 
+            from timm.models._helpers import load_checkpoint
+            from timm.models.eva import checkpoint_filter_fn
+
             model = timm.create_model(
                 model_name,
                 pretrained=False,
-                checkpoint_path=self.ckpt_path,
                 img_size=self.img_size,
                 patch_size=self.patch_size,
                 drop_path_rate=0.0,
                 dynamic_img_size=self.dynamic_size,
             )
+            load_checkpoint(model, ckpt_path, filter_fn=checkpoint_filter_fn)
             model.eval()
             return model
 

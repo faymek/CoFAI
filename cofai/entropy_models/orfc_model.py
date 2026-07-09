@@ -26,22 +26,73 @@ def _to_gpu(x, device):
 #                    GPU Batch Normalization
 # ================================================================
 
-def batch_normalize_gpu(X, mode='per_image', eps=1e-5):
+def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
     """
     GPU batch normalization.
 
     Args:
         X:    [N_img, T, C] GPU tensor
-        mode: 'per_image'
+        mode: 'per_image' | 'per_token_ln' | 'split_cls_patch' | 'split_reg_cls_patch'
+        n_prefix: number of CLS+register prefix tokens (split_* modes)
 
     Returns:
         Y:   [N_img, T, C] normalized
-        mu:  mean [N_img, 1, 1]
-        std: stddev [N_img, 1, 1]
+        mu:  mean (per_image: [N_img, 1, 1]; split/per_token_ln: [N_img, T, 1])
+        std: stddev (same shape as mu)
     """
-    if mode == 'per_image':
+    if mode == 'split_reg_cls_patch':
+        N, T, C = X.shape
+        mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        if n_prefix >= 2 and n_prefix < T:
+            # reg tokens [1, n_prefix): own stats
+            X_reg = X[:, 1:n_prefix, :]
+            mu_reg = X_reg.mean(dim=(1, 2), keepdim=True)
+            std_reg = (((X_reg - mu_reg) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, 1:n_prefix, :] = mu_reg
+            std[:, 1:n_prefix, :] = std_reg
+
+            # cls + patch: token 0 and tokens[n_prefix:]
+            X_cp = torch.cat([X[:, :1, :], X[:, n_prefix:, :]], dim=1)
+            mu_cp = X_cp.mean(dim=(1, 2), keepdim=True)
+            std_cp = (((X_cp - mu_cp) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, :1, :] = mu_cp
+            mu[:, n_prefix:, :] = mu_cp
+            std[:, :1, :] = std_cp
+            std[:, n_prefix:, :] = std_cp
+        else:
+            mu_all = X.mean(dim=(1, 2), keepdim=True)
+            std_all = (((X - mu_all) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:] = mu_all
+            std[:] = std_all
+    elif mode == 'split_cls_patch':
+        N, T, C = X.shape
+        mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        if 0 < n_prefix < T:
+            X_cr = X[:, :n_prefix, :]
+            mu_cr = X_cr.mean(dim=(1, 2), keepdim=True)
+            std_cr = (((X_cr - mu_cr) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, :n_prefix, :] = mu_cr
+            std[:, :n_prefix, :] = std_cr
+
+            X_p = X[:, n_prefix:, :]
+            mu_p = X_p.mean(dim=(1, 2), keepdim=True)
+            std_p = (((X_p - mu_p) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, n_prefix:, :] = mu_p
+            std[:, n_prefix:, :] = std_p
+        else:
+            mu_all = X.mean(dim=(1, 2), keepdim=True)
+            std_all = (((X - mu_all) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:] = mu_all
+            std[:] = std_all
+    elif mode == 'per_image':
         mu = X.mean(dim=(1, 2), keepdim=True)
         var = ((X - mu) ** 2).mean(dim=(1, 2), keepdim=True)
+        std = (var + eps).sqrt()
+    elif mode == 'per_token_ln':
+        mu = X.mean(dim=2, keepdim=True)
+        var = ((X - mu) ** 2).mean(dim=2, keepdim=True)
         std = (var + eps).sqrt()
     else:
         raise ValueError(f"Unknown norm mode: {mode}")
@@ -76,8 +127,10 @@ def batched_kmeans(sub_vectors_3d, K, max_iter=100, device='cuda',
     X = _to_gpu(sub_vectors_3d, device)
     G, N, dim = X.shape
 
+    # Bound peak memory for cdist output [G,chunk,K] and internal [G,chunk,dim].
     max_mem_bytes = 1 * 1024**3
-    chunk_size = max(1, min(N, max_mem_bytes // (G * K * 4)))
+    mem_per_sample = G * max(K, dim) * 4
+    chunk_size = max(1, min(N, max_mem_bytes // mem_per_sample))
 
     init_indices = torch.stack([
         torch.randperm(N, device=device)[:K] for _ in range(G)

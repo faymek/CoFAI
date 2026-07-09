@@ -1,0 +1,77 @@
+# DINOv3 ViT-L/16 blk23 (slot24) offline ORFC-2446 / SoftPQ pipeline.
+# Paths are resolved relative to PROJECT_ROOT unless absolute.
+
+layer: blk23
+layer_idx: 23
+slot: 24
+patch_size: 16
+embed_dim: 1024
+n_prefix: 5
+n_storage_tokens: 4
+
+# COCO train features are 640x480 -> short-side 1024 -> 64x85 patches
+coco_token_hw: [64, 85]
+
+paths:
+  train_feat_dir: ../ORFC/features/train/dinov3_vitl16_coco/blk23
+  val_feat_root: features/dinov3_vitl16_slot24
+  weights_dir: weights/orfc_2446_dinov3
+  results_dir: examples/orfc_2446_dinov3/results
+  backbone: weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.pth
+  semseg_head: weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+  depth_head: weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
+
+datasets:
+  semseg:
+    type: SegmentationDataset
+    root: data/ADEChallengeData2016
+    img_path: images/validation
+    seg_map_path: annotations/validation
+    file_list: null
+    reduce_zero_label: true
+    test_transforms:
+      - type: cofai.transforms.PadToMultiple
+        multiple: 16
+        keys: [img, semseg]
+      - type: cofai.transforms.AddIgnoreRegions
+      - type: cofai.transforms.ToTensor
+        keys: [img, semseg]
+    meter:
+      type: MeanIoUMetric
+      num_classes: 150
+    metric_key: semseg_mIoU
+
+  depth:
+    type: NYUDepthDataset
+    root: data/NYU
+    split_file: nyu_test.txt
+    test_transforms:
+      - type: cofai.transforms.PadToMultiple
+        multiple: 16
+        keys: [img]
+      - type: cofai.transforms.ToTensor
+        keys: [img]
+    meter:
+      type: Dinov3DepthEstimationMeter
+      names: [rmse, abs_rel, a1]
+      min_depth: 0.001
+      max_depth: 10.0
+      ignored_value: 0.0
+      eval_mask: NYU_EIGEN
+      normalization_constant: 1000.0
+    metric_key: depth_rmse
+
+# Default training hyperparameters (override via CLI / run_train_pipeline.sh)
+train_defaults:
+  epochs: 30
+  lr: 3.0e-4
+  batch_size: 4
+  max_train: 1000
+  n_val: 50
+  lmbda: 0.0
+  tau_start: 0.5
+  tau_end: 0.005
+  norm_mode: split_cls_patch
+  embedding_dim: 32
+  kmeans_max_samples: 2000000
+  seed: 42

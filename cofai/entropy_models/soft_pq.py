@@ -17,6 +17,7 @@ Components:
 
 import math
 import time
+import gc
 import numpy as np
 import torch
 import torch.nn as nn
@@ -156,12 +157,14 @@ class SoftPQ(nn.Module):
         N = Z_flat.shape[0]
         sub = Z_flat.reshape(N, self.G, self.d).permute(1, 0, 2).contiguous()
         del Z_flat
-        torch.cuda.empty_cache()
         with torch.no_grad():
             centroids = batched_kmeans(sub, self.K,
                                        max_iter=max_iter,
                                        device=device, verbose=False)
             self.codebooks.data.copy_(centroids.cpu())
+            del centroids, sub
+        gc.collect()
+        torch.cuda.empty_cache()
 
     def init_codebooks(self, codebooks_list):
         """Warm-start codebooks from a list of [K, d] numpy arrays."""
@@ -454,11 +457,31 @@ def compute_perplexity(usage):
 #                    Training
 # ================================================================
 
+def _is_norm_only_tail(tail) -> bool:
+    """True when frozen tail has no blocks (final-layer split, norm only)."""
+    return tail is not None and len(getattr(tail, "blocks", [])) == 0
+
+
+def _patch_only_active(train_tokens: str, n_prefix: int) -> bool:
+    return train_tokens == "patch" and n_prefix > 0
+
+
+def codec_forward(Y, codec, n_prefix: int = 0, prefix_bypass: bool = False):
+    """Forward codec; optionally keep prefix tokens identity in norm space."""
+    if prefix_bypass and n_prefix > 0 and n_prefix < Y.shape[1]:
+        Y_hat = Y.clone()
+        patch_hat, usage = codec(Y[:, n_prefix:, :])
+        Y_hat[:, n_prefix:, :] = patch_hat
+        return Y_hat, usage
+    return codec(Y)
+
+
 def train_soft_pq(
     features_train,
     tail,
     G, K, d,
     norm_mode='per_image',
+    n_prefix=0,
     epochs=100,
     lr=1e-3,
     batch_size=4,
@@ -480,8 +503,15 @@ def train_soft_pq(
     tau_start=1.0,
     tau_end=0.01,
     tau_schedule='exponential',
+    precompute_teacher=None,
+    train_tokens='all',
 ):
     """Train FeatureCodec (transform + PQ) to minimise J = R + lambda * D.
+
+    Args:
+        train_tokens: ``'all'`` (default) or ``'patch'`` — when ``'patch'`` and
+            ``n_prefix > 0``, OPQ/SoftPQ forward, distortion, and rate use patch
+            tokens only; prefix is identity in norm space.
 
     Returns:
         codec: trained FeatureCodec module.
@@ -490,9 +520,14 @@ def train_soft_pq(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
+    patch_only = _patch_only_active(train_tokens, n_prefix)
+
     N_img = len(features_train)
     D = features_train[0].shape[1]
-    features_array = np.stack(features_train)
+    if isinstance(features_train, np.ndarray):
+        features_array = features_train
+    else:
+        features_array = np.stack(features_train)
     pq = SoftPQ(G, K, d, lmbda=lmbda, prior_floor=prior_floor).to(device)
     if transform is not None:
         transform = transform.to(device)
@@ -517,14 +552,18 @@ def train_soft_pq(
             pq.init_prior_from_freq(prior_init_counts)
     else:
         if verbose:
-            print(f"  K-means init for codebooks ({N_img} images)...")
+            scope = "patch tokens" if patch_only else f"{N_img} images"
+            print(f"  K-means init for codebooks ({scope})...")
         all_Z = []
         for start in range(0, N_img, 200):
             end = min(start + 200, N_img)
             X = torch.from_numpy(features_array[start:end]).float().to(device)
             with torch.no_grad():
-                Y, _, _ = batch_normalize_gpu(X, mode=norm_mode)
-                flat = Y.reshape(-1, D)
+                Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
+                if patch_only:
+                    flat = Y[:, n_prefix:, :].reshape(-1, D)
+                else:
+                    flat = Y.reshape(-1, D)
                 Z = transform.encode(flat) if transform else flat
             all_Z.append(Z.cpu())
             del X, Y, flat, Z
@@ -535,9 +574,12 @@ def train_soft_pq(
             Z_flat = Z_flat[idx]
         pq.init_from_kmeans(Z_flat, device=device)
         del all_Z, Z_flat
-        torch.cuda.empty_cache()
         if verbose:
             print(f"  K-means init done.")
+            if torch.cuda.is_available():
+                alloc = torch.cuda.memory_allocated(device) / 1e9
+                reserved = torch.cuda.memory_reserved(device) / 1e9
+                print(f"  CUDA after k-means: alloc={alloc:.2f}GB reserved={reserved:.2f}GB")
 
     if freeze_transform and transform is not None:
         for p in transform.parameters():
@@ -567,32 +609,43 @@ def train_soft_pq(
             print(f"  Soft PQ: tau {tau_start:.2f} -> {tau_end:.4f} ({tau_schedule})")
         else:
             print(f"  Hard PQ (tau=0)")
+        if patch_only:
+            print(f"  Patch-only training: n_prefix={n_prefix} (prefix bypass in norm space)")
+
+    if precompute_teacher is None:
+        precompute_teacher = not _is_norm_only_tail(tail)
 
     teacher_cache = None
     if not use_mse_loss:
-        if verbose:
-            print(f"  Pre-computing teacher outputs ({N_img} images)...")
-        t_pre = time.time()
-        teacher_cache = np.empty_like(features_array)
-        with torch.no_grad():
-            for start in range(0, N_img, batch_size):
-                end = min(start + batch_size, N_img)
-                X_chunk = torch.from_numpy(
-                    features_array[start:end]).float().to(device)
-                teacher_cache[start:end] = tail.forward_nograd(
-                    X_chunk).cpu().numpy()
-                del X_chunk
-        torch.cuda.empty_cache()
-        if verbose:
-            cache_gb = teacher_cache.nbytes / 1e9
-            print(f"  Teacher cache: {cache_gb:.1f} GB CPU "
-                  f"({time.time() - t_pre:.1f}s)")
+        if precompute_teacher:
+            if verbose:
+                print(f"  Pre-computing teacher outputs ({N_img} images)...")
+            t_pre = time.time()
+            teacher_cache = np.empty_like(features_array)
+            with torch.no_grad():
+                for start in range(0, N_img, batch_size):
+                    end = min(start + batch_size, N_img)
+                    X_chunk = torch.from_numpy(
+                        features_array[start:end]).float().to(device)
+                    teacher_cache[start:end] = tail.forward_nograd(
+                        X_chunk).cpu().numpy()
+                    del X_chunk
+            torch.cuda.empty_cache()
+            if verbose:
+                cache_gb = teacher_cache.nbytes / 1e9
+                print(f"  Teacher cache: {cache_gb:.1f} GB CPU "
+                      f"({time.time() - t_pre:.1f}s)")
+        elif verbose:
+            print("  Skipping teacher precompute (norm-only tail; on-the-fly per batch)")
 
     val_array = None
     val_teacher_cache = None
     if val_features is not None and len(val_features) > 0:
-        val_array = np.stack(val_features)
-        if not use_mse_loss:
+        if isinstance(val_features, np.ndarray):
+            val_array = val_features
+        else:
+            val_array = np.stack(val_features)
+        if not use_mse_loss and precompute_teacher:
             n_val = len(val_features)
             val_teacher_cache = np.empty_like(val_array)
             with torch.no_grad():
@@ -649,23 +702,39 @@ def train_soft_pq(
             T = X.shape[1]
 
             with torch.no_grad():
-                Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
+                Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
 
-            Y_hat, usage = codec(Y)
+            Y_hat, usage = codec_forward(
+                Y, codec, n_prefix, prefix_bypass=patch_only,
+            )
+
+            if patch_only:
+                n_rate_tok = T - n_prefix
+                y_ref = Y[:, n_prefix:, :]
+                y_hat_ref = Y_hat[:, n_prefix:, :]
+            else:
+                n_rate_tok = T
+                y_ref = Y
+                y_hat_ref = Y_hat
 
             if use_mse_loss:
-                distortion = ((Y - Y_hat) ** 2).sum() / B
+                distortion = ((y_ref - y_hat_ref) ** 2).sum() / B
             else:
                 if Y_teacher is None:
                     with torch.no_grad():
                         Y_teacher = tail.forward_nograd(X)
                 X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
                 X_hat_out = tail(X_hat)
-                distortion = ((Y_teacher - X_hat_out) ** 2).sum() / B
+                if patch_only:
+                    distortion = (
+                        (Y_teacher[:, n_prefix:] - X_hat_out[:, n_prefix:]) ** 2
+                    ).sum() / B
+                else:
+                    distortion = ((Y_teacher - X_hat_out) ** 2).sum() / B
                 del Y_teacher, X_hat, X_hat_out
 
             if codec.use_rate:
-                rate_bits = codec._last_rate * T
+                rate_bits = codec._last_rate * n_rate_tok
                 loss = rate_bits + lmbda * distortion
             else:
                 loss = distortion
@@ -678,8 +747,8 @@ def train_soft_pq(
 
             total_distortion += distortion.item() * B
             if codec.use_rate:
-                total_rate += codec._last_rate.item() * B
-            total_tokens += B * T
+                total_rate += codec._last_rate.item() * n_rate_tok * B
+            total_tokens += B * n_rate_tok
             usage_acc += usage.detach()
 
             del X, Y, Mu, Std, Y_hat, loss, distortion
@@ -700,10 +769,18 @@ def train_soft_pq(
                     ve = min(vs + batch_size, n_val)
                     X_v = torch.from_numpy(val_array[vs:ve]).float().to(device)
                     Bv = X_v.shape[0]
-                    Y_v, Mu_v, Std_v = batch_normalize_gpu(X_v, mode=norm_mode)
-                    Yh_v, _ = codec(Y_v)
+                    Y_v, Mu_v, Std_v = batch_normalize_gpu(
+                        X_v, mode=norm_mode, n_prefix=n_prefix
+                    )
+                    Yh_v, _ = codec_forward(
+                        Y_v, codec, n_prefix, prefix_bypass=patch_only,
+                    )
                     if use_mse_loss:
-                        val_loss_sum += ((Y_v - Yh_v) ** 2).sum().item() / Bv * Bv
+                        if patch_only:
+                            d_v = ((Y_v[:, n_prefix:] - Yh_v[:, n_prefix:]) ** 2).sum()
+                        else:
+                            d_v = ((Y_v - Yh_v) ** 2).sum()
+                        val_loss_sum += d_v.item() / Bv * Bv
                     else:
                         if val_teacher_cache is not None:
                             Yt_v = torch.from_numpy(
@@ -712,14 +789,21 @@ def train_soft_pq(
                             Yt_v = tail.forward_nograd(X_v)
                         Xh_v = batch_inv_normalize_gpu(Yh_v, Mu_v, Std_v)
                         Xo_v = tail.forward_nograd(Xh_v)
-                        val_loss_sum += ((Yt_v - Xo_v) ** 2).sum().item() / Bv * Bv
+                        if patch_only:
+                            d_v = (
+                                (Yt_v[:, n_prefix:] - Xo_v[:, n_prefix:]) ** 2
+                            ).sum()
+                        else:
+                            d_v = ((Yt_v - Xo_v) ** 2).sum()
+                        val_loss_sum += d_v.item() / Bv * Bv
                         del Yt_v, Xh_v, Xo_v
                     del X_v, Y_v, Mu_v, Std_v, Yh_v
             val_loss = val_loss_sum / n_val
 
         T_tokens = features_train[0].shape[0]
+        T_rate = T_tokens - n_prefix if patch_only else T_tokens
         rate_bits_bpt = avg_rate
-        rate_per_image = avg_rate * T_tokens if codec.use_rate else 0.0
+        rate_per_image = avg_rate * T_rate if codec.use_rate else 0.0
 
         epoch_info = {
             'epoch': epoch,
@@ -759,7 +843,7 @@ def train_soft_pq(
 # ================================================================
 
 def soft_pq_encode_decode(features, codec, norm_mode, device,
-                          chunk_images=None):
+                          chunk_images=None, n_prefix=0, prefix_bypass=False):
     """Encode/decode features using trained FeatureCodec (hard PQ at eval)."""
     codec.eval()
     N = len(features)
@@ -776,8 +860,10 @@ def soft_pq_encode_decode(features, codec, norm_mode, device,
             end = min(start + chunk_images, N)
             X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
             B = X.shape[0]
-            Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
-            Y_hat, _ = codec(Y)
+            Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
+            Y_hat, _ = codec_forward(
+                Y, codec, n_prefix, prefix_bypass=prefix_bypass,
+            )
             X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
             for i in range(B):
                 all_xhat.append(X_hat[i].cpu().numpy())
@@ -790,7 +876,7 @@ def soft_pq_encode_decode(features, codec, norm_mode, device,
 #                    Codec save / load
 # ================================================================
 
-def save_codec(codec, path):
+def save_codec(codec, path, **extra_meta):
     """Save codec architecture params + state dict."""
     pq = codec.pq
     meta = {
@@ -800,6 +886,7 @@ def save_codec(codec, path):
         'transform_type': (type(codec.transform).__name__
                            if codec.transform else None),
     }
+    meta.update(extra_meta)
     if codec.transform is not None and hasattr(codec.transform, 'D'):
         meta['D'] = codec.transform.D
     elif codec.transform is not None and hasattr(codec.transform, 'D_in'):
@@ -809,9 +896,14 @@ def save_codec(codec, path):
     torch.save(meta, path)
 
 
+def load_codec_meta(path):
+    """Load checkpoint metadata without building the module."""
+    return torch.load(path, map_location='cpu', weights_only=False)
+
+
 def load_codec(path, device='cuda'):
     """Reconstruct a FeatureCodec from a saved checkpoint."""
-    meta = torch.load(path, map_location='cpu', weights_only=False)
+    meta = load_codec_meta(path)
     G, K, d = meta['G'], meta['K'], meta['d']
     pq = SoftPQ(G, K, d,
                 lmbda=meta.get('lmbda', 0.0),

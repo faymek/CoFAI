@@ -1,0 +1,68 @@
+# DINOv3 ViT-L/16 slot24 offline VTM pipeline defaults.
+# Paths are resolved relative to PROJECT_ROOT unless absolute.
+
+patch_size: 16
+embed_dim: 1024
+slot: 24
+bit_depth: 10
+
+vtm:
+  dir: ../ORFC/coding/vtm_baseline
+  encoder: EncoderAppStatic
+  decoder: DecoderAppStatic
+  cfg: encoder_intra_vtm.cfg
+
+paths:
+  backbone: weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.pth
+  semseg_head: weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+  depth_head: weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
+  feat_root: features/dinov3_vitl16_slot24
+  results_dir: examples/vtm/results
+
+datasets:
+  semseg:
+    type: SegmentationDataset
+    root: data/ADEChallengeData2016
+    img_path: images/validation
+    seg_map_path: annotations/validation
+    file_list: null
+    reduce_zero_label: true
+    test_transforms:
+      - type: cofai.transforms.PadToMultiple
+        multiple: 16
+        keys: [img, semseg]
+      - type: cofai.transforms.AddIgnoreRegions
+      - type: cofai.transforms.ToTensor
+        keys: [img, semseg]
+    meter:
+      type: MeanIoUMetric
+      num_classes: 150
+    bypass_plan: conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
+    metric_key: semseg_mIoU
+
+  depth:
+    type: NYUDepthDataset
+    root: data/NYU
+    split_file: nyu_test.txt
+    test_transforms:
+      - type: cofai.transforms.PadToMultiple
+        multiple: 16
+        keys: [img]
+      - type: cofai.transforms.ToTensor
+        keys: [img]
+    meter:
+      type: Dinov3DepthEstimationMeter
+      names: [rmse, abs_rel, a1]
+      min_depth: 0.001
+      max_depth: 10.0
+      ignored_value: 0.0
+      eval_mask: NYU_EIGEN
+      normalization_constant: 1000.0
+    bypass_plan: conf/plan/nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
+    metric_key: depth_rmse
+
+default_qps: [22, 32, 42]
+default_workers: 24
+verify_tolerance:
+  semseg_mIoU: 0.001
+  depth_rmse: 0.001

@@ -46,7 +46,7 @@ model:
     n_last_blocks: 1
     cast_dtype: float16
     pretrained: false
-    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.pth
   dino_codec:
     type: cofai.latent_codecs.BypassLatentCodec
   heads:
