@@ -1,0 +1,1 @@
+../../../../orfc/offline/cfg/dinov2_vitl14_voc2012_linear_config.py

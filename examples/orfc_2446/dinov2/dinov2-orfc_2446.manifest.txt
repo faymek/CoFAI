@@ -1,0 +1,38 @@
+# SoftPQ / ORFC-2446 DINOv2 数据与权重清单 (cofai-download manifest)
+# poetry run cofai-download examples/orfc_2446/dinov2/dinov2-orfc_2446.manifest.txt
+#
+# 清单格式: <目标相对路径>  [URL]  [sha256:..]
+# 目标路径相对仓库根目录 (PROJECT_ROOT)。
+# 省略 URL 时, 默认从 https://medialab.sjtu.edu.cn/files/CoFAI-share/<目标相对路径> 下载。
+#
+# SoftPQ 权重网盘目录:
+#   https://medialab.sjtu.edu.cn/files/CoFAI-share/weights/orfc_2446/
+# 下载 zip 后请解压:
+#   bash examples/orfc_2446/dinov2/scripts/unzip_softpq_weights.sh
+#
+# 覆盖 conf/plan/dinov2/*SoftPQ* 全部在线评测
+# (ViT-L/14: blk05/10/15/20; ViT-G/14: blk09/19/29)。
+
+
+# --- 数据集 (解压到 data/ 下同名目录) ---
+data/ImageNet_val_sel500.zip
+data/VOC2012_sel100.zip
+
+
+# --- DINOv2 预训练 backbone ---
+weights/dinov2/backbone/dinov2_vitl14_pretrain.pth
+weights/dinov2/backbone/dinov2_vitg14_pretrain.pth
+
+
+# --- 任务头 ---
+# 分类线性头 (cls)
+weights/dinov2/cls_head/dinov2_vitl14_linear_head.pth
+weights/dinov2/cls_head/dinov2_vitg14_linear_head.pth
+# 分割线性头 (semseg)
+weights/dinov2/semseg_head/dinov2_vitl14_voc2012_linear_head.pth
+weights/dinov2/semseg_head/dinov2_vitg14_voc2012_linear_head.pth
+
+
+# --- SoftPQ 量化权重压缩包 (解压后得到 dinov2_*_ori/*.npz) ---
+weights/orfc_2446/dinov2_vitl14_ori.zip  sha256:8bdc0f4f18877e60d8954a674567a3a5e7488ca1415630e4728b121fbab2ba14
+weights/orfc_2446/dinov2_vitg14_ori.zip  sha256:8a4553e30729e2b4c198b6facf502ce3da8bafd4081be5bac3387afaaa09c13a

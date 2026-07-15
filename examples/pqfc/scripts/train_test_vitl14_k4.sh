@@ -2,7 +2,7 @@
 # Train + offline test PQFC K=4 emb=32 for DINOv2 ViT-L/14 blk10/15/20.
 #
 # WITH orthogonal transform (default --use_transform) + soft PQ, aligned with
-# examples/orfc_2446/scripts/train_vitl14_k4.sh hyperparameters:
+# examples/orfc_2446/dinov2/scripts/train_vitl14_k4.sh hyperparameters:
 #   blk20: lmbda=0.0, lr=5e-4, ep=300
 #   blk10/blk15: lmbda=0.5, lr=3e-4, ep=100
 #

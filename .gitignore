@@ -14,6 +14,13 @@
 /scripts/
 .venv-*/
 
+# Nested example run artifacts (root /results/ /logs/ only cover repo root)
+examples/**/results/
+examples/**/logs/
+examples/**/log/
+*.yuv
+rec.yuv
+
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
@@ -36,6 +43,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!examples/orfc_2446/dinov3/lib/
+!examples/orfc_2446/dinov3/lib/*.py
 lib64/
 parts/
 sdist/

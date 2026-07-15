@@ -1,1 +1,0 @@
-../../../orfc/offline/cfg/voc2012_val_100.txt

@@ -1,18 +1,15 @@
-"""Soft-PQ (Differentiable Product Quantization) as a latent codec.
+"""Soft-PQ as a latent codec loaded from a single ORFC-compatible ``.npz``.
 
-Wraps the trained :class:`~cofai.entropy_models.soft_pq.FeatureCodec` as a
-latent-codec API component usable by
-:class:`~cofai.models.base.DinoFeatureCodecModel` /
-:class:`~cofai.models.base.DinoSlideFeatureCodecModel`.
+Canonical weight file fields: ``R`` (D, D), ``codebooks`` (G, K, d), optional
+``pmf`` (G, K), optional ``norm_mode`` / ``n_prefix``.
 
-When a sidecar ``.npz`` (same stem as ``codec_path``) provides ``pmf``, labels
-are entropy-coded with rANS for real compression and bit accounting (ORFC-style).
+Quantization: normalize -> rotate by ``R`` -> product-quantize -> inverse rotate
+-> denormalize. When ``pmf`` is present, labels are entropy-coded with rANS.
 """
 
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -22,62 +19,95 @@ import torch.nn as nn
 from cofai.entropy_models.orfc_model import (
     batch_normalize_gpu,
     batch_inv_normalize_gpu,
+    batched_assign,
 )
-from cofai.entropy_models.soft_pq import load_codec
-from cofai.entropy_models.soft_pq_export import try_load_sidecar_pmf
+from cofai.entropy_models.soft_pq_export import load_softpq_npz
 
 
 class SoftPQFeatureCodec(nn.Module):
     """Soft-PQ Feature Codec (latent codec API).
 
     Args:
-        codec_path: Path to the ``.pt`` checkpoint saved by ``save_codec``.
-        **kwargs: Ignored (config convenience).
+        codec_path: Path to SoftPQ ``.npz`` (``R``, ``codebooks``, optional ``pmf``).
+        norm_mode: Override npz meta (``per_image`` | ``split_cls_patch`` |
+            ``split_reg_cls_patch``). Empty / None -> use npz or ``per_image``.
+        n_prefix: Override npz meta prefix length for split_* norms.
+        **kwargs: Also accepts ``orfc_weights_path`` as alias of ``codec_path``.
     """
 
-    def __init__(self, codec_path: str = "", **kwargs):
+    def __init__(
+        self,
+        codec_path: str = "",
+        norm_mode: Optional[str] = None,
+        n_prefix: Optional[int] = None,
+        **kwargs,
+    ):
         super().__init__()
-        self.codec_path = str(codec_path)
-        self._codec = load_codec(codec_path, device="cpu")
-        self._codec.eval()
-        pq = self._codec.pq
-        self.G = pq.G
-        self.K = pq.K
-        self.d = pq.d
-        self.feat_dim = int(pq.D)
+        path = codec_path or kwargs.get("orfc_weights_path", "")
+        if not path:
+            raise ValueError("SoftPQFeatureCodec requires codec_path (.npz)")
+        if not str(path).endswith(".npz"):
+            # Allow passing a .pt path only if sibling .npz exists (migration aid).
+            from pathlib import Path
+            from cofai.entropy_models.soft_pq_export import npz_path_for_codec
 
-        pmf = try_load_sidecar_pmf(codec_path)
-        if pmf is not None:
-            self.register_buffer("pmf", torch.from_numpy(pmf))
+            npz = npz_path_for_codec(path)
+            if not npz.is_file():
+                raise ValueError(
+                    f"SoftPQFeatureCodec expects a .npz weight file; got {path}. "
+                    f"Export with export_softpq_npz / train pipeline first."
+                )
+            path = str(npz)
+
+        self.codec_path = str(path)
+        payload = load_softpq_npz(path)
+
+        self.K = int(payload["K"])
+        self.embedding_dim = int(payload["embedding_dim"])
+        self.G = int(payload["G"])
+        self.feat_dim = int(payload["feat_dim"])
+        self.num_groups = self.G
+
+        meta_norm = payload["norm_mode"] or "per_image"
+        meta_prefix = int(payload["n_prefix"])
+        if norm_mode is not None and str(norm_mode).strip():
+            self.norm_mode = str(norm_mode)
+        else:
+            self.norm_mode = meta_norm
+        if n_prefix is not None:
+            self.n_prefix = int(n_prefix)
+        else:
+            self.n_prefix = meta_prefix
+
+        self.register_buffer("R", torch.from_numpy(payload["R"]).float())
+        self.register_buffer("codebooks", torch.from_numpy(payload["codebooks"]).float())
+        if payload["pmf"] is not None:
+            self.register_buffer("pmf", torch.from_numpy(payload["pmf"]))
         else:
             self.pmf = None
 
     def _assign_labels(self, h):
         """(B, N, D) tokens -> mu, std, labels (G, B*N)."""
         B, N, D = h.shape
-        Y, mu, std = batch_normalize_gpu(h, mode="per_image")
-        with torch.no_grad():
-            _ = self._codec(Y)
-        labels = self._codec.pq._last_labels
+        Y, mu, std = batch_normalize_gpu(
+            h, mode=self.norm_mode, n_prefix=self.n_prefix
+        )
+        flat = Y.reshape(B * N, D)
+        Z = flat @ self.R
+        z_3d = Z.reshape(B * N, self.num_groups, self.embedding_dim)
+        z_3d = z_3d.permute(1, 0, 2).contiguous()
+        _, labels = batched_assign(z_3d, self.codebooks, device=h.device)
         return mu, std, labels
 
     def _tokens_from_labels(self, labels, mu, std, B, N):
         """Reconstruct (B, N, D) from PQ labels."""
-        pq = self._codec.pq
-        transform = self._codec.transform
-        G, d = self.G, self.d
-        device = labels.device
-
+        D = self.feat_dim
+        G = self.num_groups
+        d = self.embedding_dim
         labels_exp = labels.unsqueeze(-1).expand(G, B * N, d)
-        z_hat = torch.gather(pq.codebooks.to(device), 1, labels_exp)
-        flat_hat = z_hat.permute(1, 0, 2).reshape(B * N, G * d)
-
-        if transform is not None and hasattr(transform, "get_rotation"):
-            R = transform.get_rotation()
-            Y_hat = (flat_hat @ R.T).reshape(B, N, -1)
-        else:
-            Y_hat = transform.decode(flat_hat).reshape(B, N, -1) if transform else flat_hat.reshape(B, N, -1)
-
+        z_hat_3d = torch.gather(self.codebooks, 1, labels_exp)
+        flat_hat = z_hat_3d.permute(1, 0, 2).reshape(B * N, D)
+        Y_hat = (flat_hat @ self.R.T).reshape(B, N, D)
         return batch_inv_normalize_gpu(Y_hat, mu, std)
 
     def _theoretical_bits(self, n_tokens: int) -> float:
@@ -123,7 +153,7 @@ class SoftPQFeatureCodec(nn.Module):
         from compressai.ans import RansDecoder
 
         G = self.G
-        device = next(self.parameters()).device
+        device = self.R.device
         all_labels = []
         for g in range(G):
             cdf_list = self._group_cdf(g)
@@ -174,7 +204,7 @@ class SoftPQFeatureCodec(nn.Module):
 
     def decompress(self, strings=None, pstate=None, **kwargs):
         B, N, D = pstate["shape"]
-        device = next(self.parameters()).device
+        device = self.R.device
         mu = pstate["mu"].to(device)
         std = pstate["std"].to(device)
 

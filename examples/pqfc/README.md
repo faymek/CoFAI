@@ -1,6 +1,8 @@
 # PQFC — Product Quantization Feature Codec
 
-基于 `examples/orfc_2446` 的离线训练/评测示例。正交变换可开关，并与 soft/hard 分配绑定；损失为 `J = R + λ · D`（`D` = frozen-tail ΔL_ref）。目录内支持 CTC DINOv3（离线训练 + replay），**不**提供 CoFAI 在线 plan。
+离线训练/评测示例，与 SoftPQ（`examples/orfc_2446`）同族：正交变换可开关并与 soft/hard 分配绑定；损失 `J = R + λ · D`（`D` = frozen-tail ΔL_ref）。目录内支持 CTC DINOv3（离线 train + replay），**不**提供 CoFAI 在线 plan。
+
+对比 SoftPQ 主线见 [`examples/orfc_2446/dinov3/`](../orfc_2446/dinov3/)（单 `.npz` 评测）。PQFC 评测口径尽量对齐「单 npz」：训练结束写出含 `R`/`codebooks`/`pmf` 的 `.npz` 时，replay 优先加载该文件。
 
 ## 目录结构
 
@@ -9,7 +11,7 @@ examples/pqfc/
 ├── README.md
 ├── run_pqfc_dinov3.py              # DINOv3 CTC replay (semseg / depth)
 ├── configs/dinov3_blk23.yaml
-├── lib/                            # DINOv3 工具（部分 symlink 自 orfc_2446_dinov3）
+├── lib/                            # DINOv3 工具（部分 symlink 自 orfc_2446/dinov3）
 ├── offline/
 │   ├── train_pqfc.py               # DINOv2 / CLIP 训练
 │   ├── train_pqfc_dinov3.py        # DINOv3 CTC 训练
@@ -46,7 +48,7 @@ cd /data4/workspace/zlt/featcodec/CoFAI
 unset PYTHONPATH
 export PROJECT_ROOT=$(pwd)
 
-# 默认：有正交变换 + soft PQ（对齐 orfc_2446）
+# 默认：有正交变换 + soft PQ（对齐 orfc_2446/dinov2）
 poetry run python examples/pqfc/offline/train_pqfc.py \
     --backbone dinov2_vitl14 --layer blk10 \
     --K 64 --embedding_dim 32 --lmbda 0.5
@@ -68,20 +70,19 @@ EXTRA_ARGS='--no_transform' NUM_GPUS=4 bash examples/pqfc/scripts/train_all.sh
 ```bash
 poetry run python examples/pqfc/offline/test_cls.py \
     --backbone dinov2_vitl14 --layer blk10 \
-    --ckpt_path weights/pqfc/dinov2_vitl14/<ckpt>.pt
+    --ckpt_path weights/pqfc/dinov2_vitl14/<ckpt>.npz
 
 poetry run python examples/pqfc/offline/test_seg.py \
     --backbone dinov2_vitl14 --layer blk10 \
-    --ckpt_path weights/pqfc/dinov2_vitl14/<ckpt>.pt
+    --ckpt_path weights/pqfc/dinov2_vitl14/<ckpt>.npz
 
 NUM_GPUS=4 bash examples/pqfc/scripts/test_cls_all.sh
 NUM_GPUS=4 bash examples/pqfc/scripts/test_seg_all.sh
 
-# 一致性检验：加载 orfc_2446 已有 vitl14 全部码本配置（blk05/10/15/20），0-3 卡并行
+# 一致性检验：加载 orfc_2446 SoftPQ vitl14 码本（见 examples/orfc_2446/dinov2）
 GPU_IDS=0,1,2,3 PYTHON=.venv/bin/python \
     bash examples/pqfc/scripts/test_vitl14_all_ckpts.sh
 
-# 有变换 + soft：K4e32 训练并测试（超参对齐 orfc_2446 train_vitl14_k4）
 GPU_IDS=0,1,2,3 PYTHON=.venv/bin/python \
     bash examples/pqfc/scripts/train_test_vitl14_k4.sh
 ```
@@ -90,32 +91,42 @@ GPU_IDS=0,1,2,3 PYTHON=.venv/bin/python \
 
 ## CTC DINOv3（文件夹内）
 
-前置：ImageNet blk23 训练特征（`ORFC/features/train/dinov3_vitl16/blk23`，T≈201）、slot24 val 特征、DINOv3 backbone/head 权重（见 `configs/dinov3_blk23.yaml`）。COCO 长序列（T≈5445）可用 `FEAT_DIR=.../dinov3_vitl16_coco/blk23` 覆盖，但 24GB 卡上 SoftPQ 很重。
+与 SoftPQ DINOv3（[`orfc_2446/dinov3`](../orfc_2446/dinov3/)）共用特征/backbone 约定，但权重目录独立（`weights/pqfc/dinov3_vitl16/`）。
+
+前置：ImageNet blk23 训练特征、slot24 val 特征、DINOv3 backbone/head 权重（见 `configs/dinov3_blk23.yaml`）。
 
 ```bash
 cd /data4/workspace/zlt/featcodec/CoFAI
 unset PYTHONPATH
 export PROJECT_ROOT=$(pwd)
 
-# 8 configs: K256 e32/e16 × with/without R × λ∈{0.5,0.0}，GPU 3,4,5,7
 bash examples/pqfc/scripts/train_dinov3.sh
 # 或
 poetry run python examples/pqfc/offline/train_pqfc_dinov3.py --K 256 --embedding_dim 16
 
-# 无 R + hard（脚本内已含 noR 配置；单跑示例）
 poetry run python examples/pqfc/offline/train_pqfc_dinov3.py --K 256 --embedding_dim 16 --no_transform
 
-# Replay（semseg / depth）
+# Replay：优先传单个 .npz（含 pmf）；若仅有历史 .pt，需先导出 npz
 poetry run python examples/pqfc/run_pqfc_dinov3.py replay \
-    --task semseg --ckpt weights/pqfc/dinov3_vitl16/<ckpt>.pt --gpu 0
+    --task semseg --ckpt weights/pqfc/dinov3_vitl16/<ckpt>.npz --gpu 0
 poetry run python examples/pqfc/run_pqfc_dinov3.py replay \
-    --task depth --ckpt weights/pqfc/dinov3_vitl16/<ckpt>.pt --gpu 0
+    --task depth --ckpt weights/pqfc/dinov3_vitl16/<ckpt>.npz --gpu 0
 ```
 
 权重：`weights/pqfc/dinov3_vitl16/`  
 结果：`examples/pqfc/results/dinov3/`
 
+## 与 SoftPQ（orfc_2446）对照
+
+| | SoftPQ `orfc_2446` | PQFC |
+|--|--------------------|------|
+| DINOv2 | `orfc_2446/dinov2/` | `pqfc/offline/train_pqfc.py` |
+| DINOv3 | `orfc_2446/dinov3/` | `pqfc/`（本目录） |
+| 评测权重 | **仅 `.npz`** | 尽量对齐单 `.npz` |
+| 在线 Engine | SoftPQ plan 已接线 | 不提供 |
+
 ## Checkpoint 命名
 
-- 有变换：`{layer}_K{K}_emb{d}_bt{D}_{ws|km}_lmbda{λ}_tau{τ}_lr{lr}_ep{ep}_n{n}_s{seed}.pt`
-- 无变换：`{layer}_K{K}_emb{d}_noR_km_lmbda{λ}_lr{lr}_ep{ep}_n{n}_s{seed}.pt`
+- 有变换：`{layer}_K{K}_emb{d}_bt{D}_{ws|km}_lmbda{λ}_tau{τ}_lr{lr}_ep{ep}_n{n}_s{seed}`
+- 无变换：`{layer}_K{K}_emb{d}_noR_km_lmbda{λ}_lr{lr}_ep{ep}_n{n}_s{seed}`
+- 发布/评测优先 `.npz`；`.pt` 仅作可选 resume
