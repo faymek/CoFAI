@@ -41,7 +41,6 @@ from cofai.entropy_models.soft_pq import (
 )
 from cofai.entropy_models.soft_pq_export import (
     compute_histogram_pmf,
-    npz_path_for_codec,
     save_codec_npz,
 )
 
@@ -177,6 +176,12 @@ def train_and_save(args) -> str:
 
     # ---- Backbone + frozen tail (always ΔL_ref) ----
     print(f"\nLoading DINOv3 backbone for frozen tail (layer_idx={layer_idx})...")
+    bb_path = Path(cfg["paths"]["backbone"])
+    if not bb_path.is_file():
+        alt = bb_path.with_suffix(".safetensors" if bb_path.suffix == ".pth" else ".pth")
+        if alt.is_file():
+            bb_path = alt
+            print(f"  backbone fallback → {bb_path}")
     backbone = Dinov3TimmBackbone(
         model_size="large",
         img_size=512,
@@ -186,7 +191,7 @@ def train_and_save(args) -> str:
         n_last_blocks=1,
         cast_dtype="float32",
         pretrained=False,
-        ckpt_path=cfg["paths"]["backbone"],
+        ckpt_path=str(bb_path),
         device=str(device),
     ).eval()
     tail = build_dinov3_tail(backbone, layer_idx, token_hw, device)
@@ -304,12 +309,15 @@ def train_and_save(args) -> str:
     print(f"  Training done ({time.time() - t_spq:.1f}s)")
 
     ckpt_path = weights_dir / _ckpt_name(args, D, D)
-    save_codec(
-        codec, str(ckpt_path),
-        train_tokens=args.train_tokens,
-        use_transform=args.use_transform,
-    )
-    print(f"  Checkpoint → {ckpt_path}")
+    if getattr(args, "keep_pt", False):
+        save_codec(
+            codec, str(ckpt_path),
+            train_tokens=args.train_tokens,
+            use_transform=args.use_transform,
+            norm_mode=args.norm_mode,
+            n_prefix=n_prefix,
+        )
+        print(f"  Resume PT → {ckpt_path}")
 
     hist_path = ckpt_path.with_suffix(".history.json")
     with open(hist_path, "w") as f:
@@ -343,8 +351,17 @@ def train_and_save(args) -> str:
         batch_size=args.batch_size,
         token_slice=token_slice,
     )
-    npz_path = save_codec_npz(codec, npz_path_for_codec(ckpt_path), pmf, source_pt=ckpt_path)
-    print(f"  Sidecar NPZ → {npz_path}")
+    npz_path = save_codec_npz(
+        codec,
+        ckpt_path.with_suffix(".npz"),
+        pmf,
+        source_pt=str(ckpt_path) if getattr(args, "keep_pt", False) else None,
+        norm_mode=args.norm_mode,
+        n_prefix=n_prefix,
+    )
+    print(f"  Official NPZ → {npz_path}")
+    print(f"  meta: norm_mode={args.norm_mode} n_prefix={n_prefix} "
+          f"train_tokens={args.train_tokens}")
     _cuda_release()
 
     print(f"  Val raw MSE = {val_metrics['raw_mse']:.6f}")
@@ -352,7 +369,7 @@ def train_and_save(args) -> str:
         print(f"  Val post-LN patch MSE (delta_L_ref) = {val_metrics['post_ln_patch_mse']:.6f}")
     print(f"  Val metrics → {val_metrics_path}")
     print(f"  Val MSE = {val_metrics['raw_mse']:.6f}")
-    return str(ckpt_path)
+    return str(npz_path)
 
 
 def main():
@@ -363,11 +380,11 @@ def main():
     p.add_argument("--K", type=int, required=True)
     p.add_argument("--embedding_dim", type=int, default=defaults.get("embedding_dim", 32))
     p.add_argument("--norm_mode", choices=NORM_MODE_CHOICES,
-                   default=defaults.get("norm_mode", "split_cls_patch"))
+                   default=defaults.get("norm_mode", "per_image"))
     p.add_argument("--n_prefix", type=int, default=0)
-    p.add_argument("--epochs", type=int, default=defaults.get("epochs", 30))
+    p.add_argument("--epochs", type=int, default=defaults.get("epochs", 100))
     p.add_argument("--lr", type=float, default=defaults.get("lr", 3e-4))
-    p.add_argument("--batch_size", type=int, default=defaults.get("batch_size", 32))
+    p.add_argument("--batch_size", type=int, default=defaults.get("batch_size", 64))
     p.add_argument("--lmbda", type=float, default=defaults.get("lmbda", 0.5),
                    help="J = R + λ·D (D = ΔL_ref)")
     p.add_argument("--tau_start", type=float, default=defaults.get("tau_start", 0.5),
@@ -378,7 +395,7 @@ def main():
     p.add_argument("--prior_floor", type=float, default=0.0)
     p.add_argument("--warm_start_opq", action="store_true", default=True)
     p.add_argument("--no_warm_start", dest="warm_start_opq", action="store_false")
-    p.add_argument("--max_train", type=int, default=defaults.get("max_train", 1000))
+    p.add_argument("--max_train", type=int, default=defaults.get("max_train", 5000))
     p.add_argument("--n_val", type=int, default=defaults.get("n_val", 50))
     p.add_argument("--kmeans_max_samples", type=int, default=defaults.get("kmeans_max_samples", 2_000_000))
     p.add_argument("--train_tokens", choices=("all", "patch"), default="all")
@@ -390,6 +407,10 @@ def main():
     p.add_argument("--weights_dir", type=str, default=None)
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--seed", type=int, default=defaults.get("seed", 42))
+    p.add_argument(
+        "--keep_pt", action="store_true",
+        help="Also save intermediate .pt for resume (eval uses .npz only)",
+    )
     args = p.parse_args()
     os.environ.setdefault("PROJECT_ROOT", str(resolve_project_root()))
     train_and_save(args)

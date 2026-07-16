@@ -1,4 +1,4 @@
-"""Config loading for the DINOv3 PQFC offline pipeline."""
+"""Config loading for the DINOv3 Soft-PQ offline pipeline."""
 
 from __future__ import annotations
 

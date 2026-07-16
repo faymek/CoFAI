@@ -17,12 +17,12 @@ coco_token_hw: [64, 85]
 token_hw: [14, 14]
 
 paths:
-  # Short-sequence ImageNet features (same style as DINOv2 / train_pqfc.py).
-  # Override with --feat_dir for COCO: ../ORFC/features/train/dinov3_vitl16_coco/blk23
-  train_feat_dir: ../ORFC/features/train/dinov3_vitl16/blk23
+  # ImageNet 224 short-seq features (T=201). Override with --feat_dir if needed.
+  train_feat_dir: features/train/dinov3_vitl16/blk23
   val_feat_root: features/dinov3_vitl16_slot24
   weights_dir: weights/pqfc/dinov3_vitl16
   results_dir: examples/pqfc/results/dinov3
+  # .pth or .safetensors (prepare_dinov3.sh links both names when one exists)
   backbone: weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.pth
   semseg_head: weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
   depth_head: weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
@@ -78,7 +78,7 @@ train_defaults:
   lmbda: 0.5
   tau_start: 0.5
   tau_end: 0.005
-  norm_mode: split_cls_patch
+  norm_mode: per_image
   embedding_dim: 32
   kmeans_max_samples: 2000000
   seed: 42

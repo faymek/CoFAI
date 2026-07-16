@@ -45,6 +45,8 @@ eggs/
 lib/
 !examples/orfc_2446/dinov3/lib/
 !examples/orfc_2446/dinov3/lib/*.py
+!examples/pqfc/lib/
+!examples/pqfc/lib/*.py
 lib64/
 parts/
 sdist/
