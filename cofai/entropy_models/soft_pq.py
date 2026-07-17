@@ -18,6 +18,8 @@ Components:
 import math
 import time
 import gc
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -429,18 +431,58 @@ class Siglip2FrozenTail:
 #                    Dataset / Utilities
 # ================================================================
 
-class FeatureDataset(Dataset):
-    """Wraps a pre-stacked [N, T, D] numpy array for DataLoader prefetch."""
+def _is_path_collection(features) -> bool:
+    """True when ``features`` is a sequence of filesystem paths."""
+    if isinstance(features, np.ndarray):
+        return False
+    if not features:
+        return False
+    return isinstance(features[0], (str, Path))
 
-    def __init__(self, features_array, teacher_cache=None):
-        self.data = features_array
+
+def _load_feature_item(features, idx: int) -> np.ndarray:
+    """Load one [T, D] feature from ndarray stack, path list, or array list."""
+    if isinstance(features, np.ndarray):
+        return np.asarray(features[idx], dtype=np.float32)
+    item = features[idx]
+    if isinstance(item, (str, Path)):
+        return np.load(item).astype(np.float32)
+    return np.asarray(item, dtype=np.float32)
+
+
+def _feature_count(features) -> int:
+    if isinstance(features, np.ndarray):
+        return int(features.shape[0])
+    return len(features)
+
+
+def _feature_token_dim(features) -> tuple[int, int]:
+    """Return (T, D) for the first sample."""
+    if isinstance(features, np.ndarray):
+        return int(features.shape[1]), int(features.shape[2])
+    sample = _load_feature_item(features, 0)
+    return int(sample.shape[0]), int(sample.shape[1])
+
+
+class FeatureDataset(Dataset):
+    """Training features as a stacked ndarray or a list of ``.npy`` paths.
+
+    Path mode loads one image per ``__getitem__`` so large corpora need not
+    reside fully in RAM. ``teacher_cache`` is only used with in-memory stacks.
+    """
+
+    def __init__(self, features, teacher_cache=None):
+        self.features = features
         self.teacher_cache = teacher_cache
+        self.path_mode = _is_path_collection(features)
+        if self.path_mode and teacher_cache is not None:
+            raise ValueError("teacher_cache is not supported with path-mode features")
 
     def __len__(self):
-        return self.data.shape[0]
+        return _feature_count(self.features)
 
     def __getitem__(self, idx):
-        x = torch.from_numpy(self.data[idx]).float()
+        x = torch.from_numpy(_load_feature_item(self.features, idx)).float()
         if self.teacher_cache is not None:
             return x, torch.from_numpy(self.teacher_cache[idx]).float()
         return x
@@ -462,17 +504,8 @@ def _is_norm_only_tail(tail) -> bool:
     return tail is not None and len(getattr(tail, "blocks", [])) == 0
 
 
-def _patch_only_active(train_tokens: str, n_prefix: int) -> bool:
-    return train_tokens == "patch" and n_prefix > 0
-
-
-def codec_forward(Y, codec, n_prefix: int = 0, prefix_bypass: bool = False):
-    """Forward codec; optionally keep prefix tokens identity in norm space."""
-    if prefix_bypass and n_prefix > 0 and n_prefix < Y.shape[1]:
-        Y_hat = Y.clone()
-        patch_hat, usage = codec(Y[:, n_prefix:, :])
-        Y_hat[:, n_prefix:, :] = patch_hat
-        return Y_hat, usage
+def codec_forward(Y, codec):
+    """Forward codec on all tokens."""
     return codec(Y)
 
 
@@ -504,14 +537,11 @@ def train_soft_pq(
     tau_end=0.01,
     tau_schedule='exponential',
     precompute_teacher=None,
-    train_tokens='all',
 ):
     """Train FeatureCodec (transform + PQ) to minimise J = R + lambda * D.
 
-    Args:
-        train_tokens: ``'all'`` (default) or ``'patch'`` — when ``'patch'`` and
-            ``n_prefix > 0``, OPQ/SoftPQ forward, distortion, and rate use patch
-            tokens only; prefix is identity in norm space.
+    ``features_train`` may be a stacked ``np.ndarray`` ``[N, T, D]``, a list of
+    arrays, or a list of ``.npy`` paths (lazy disk reads).
 
     Returns:
         codec: trained FeatureCodec module.
@@ -520,14 +550,9 @@ def train_soft_pq(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    patch_only = _patch_only_active(train_tokens, n_prefix)
-
-    N_img = len(features_train)
-    D = features_train[0].shape[1]
-    if isinstance(features_train, np.ndarray):
-        features_array = features_train
-    else:
-        features_array = np.stack(features_train)
+    N_img = _feature_count(features_train)
+    T_tokens, D = _feature_token_dim(features_train)
+    path_mode = _is_path_collection(features_train)
     pq = SoftPQ(G, K, d, lmbda=lmbda, prior_floor=prior_floor).to(device)
     if transform is not None:
         transform = transform.to(device)
@@ -552,30 +577,32 @@ def train_soft_pq(
             pq.init_prior_from_freq(prior_init_counts)
     else:
         if verbose:
-            scope = "patch tokens" if patch_only else f"{N_img} images"
-            print(f"  K-means init for codebooks ({scope})...")
+            print(f"  K-means init for codebooks (cap={kmeans_max_samples} tokens)...")
         all_Z = []
-        for start in range(0, N_img, 200):
-            end = min(start + 200, N_img)
-            X = torch.from_numpy(features_array[start:end]).float().to(device)
+        n_tok = 0
+        order = np.random.permutation(N_img)
+        chunk = 32 if path_mode else 200
+        for start in range(0, N_img, chunk):
+            if n_tok >= kmeans_max_samples:
+                break
+            batch_idx = order[start:min(start + chunk, N_img)]
+            batch = np.stack([_load_feature_item(features_train, int(i)) for i in batch_idx])
+            X = torch.from_numpy(batch).float().to(device)
             with torch.no_grad():
                 Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
-                if patch_only:
-                    flat = Y[:, n_prefix:, :].reshape(-1, D)
-                else:
-                    flat = Y.reshape(-1, D)
+                flat = Y.reshape(-1, D)
                 Z = transform.encode(flat) if transform else flat
             all_Z.append(Z.cpu())
-            del X, Y, flat, Z
+            n_tok += Z.shape[0]
+            del X, Y, flat, Z, batch
         Z_flat = torch.cat(all_Z, dim=0)
-        max_km = kmeans_max_samples
-        if Z_flat.shape[0] > max_km:
-            idx = np.random.choice(Z_flat.shape[0], max_km, replace=False)
+        if Z_flat.shape[0] > kmeans_max_samples:
+            idx = np.random.choice(Z_flat.shape[0], kmeans_max_samples, replace=False)
             Z_flat = Z_flat[idx]
         pq.init_from_kmeans(Z_flat, device=device)
         del all_Z, Z_flat
         if verbose:
-            print(f"  K-means init done.")
+            print(f"  K-means init done ({n_tok} tokens scanned).")
             if torch.cuda.is_available():
                 alloc = torch.cuda.memory_allocated(device) / 1e9
                 reserved = torch.cuda.memory_reserved(device) / 1e9
@@ -603,30 +630,36 @@ def train_soft_pq(
     if verbose:
         n_trainable = sum(p.numel() for p in trainable)
         print(f"  Trainable params: {n_trainable:,}")
+        if path_mode:
+            print(f"  Features: path-mode lazy load ({N_img} files, T={T_tokens}, D={D})")
         if transform is not None and hasattr(transform, 'orth_error'):
             print(f"  Orthogonal transform: ||R'R-I||={transform.orth_error():.2e}")
         if _use_soft:
             print(f"  Soft PQ: tau {tau_start:.2f} -> {tau_end:.4f} ({tau_schedule})")
         else:
             print(f"  Hard PQ (tau=0)")
-        if patch_only:
-            print(f"  Patch-only training: n_prefix={n_prefix} (prefix bypass in norm space)")
 
     if precompute_teacher is None:
         precompute_teacher = not _is_norm_only_tail(tail)
 
     teacher_cache = None
     if not use_mse_loss:
+        if precompute_teacher and path_mode:
+            if verbose:
+                print("  Path-mode features: teacher on-the-fly (skip CPU precompute)")
+            precompute_teacher = False
         if precompute_teacher:
             if verbose:
                 print(f"  Pre-computing teacher outputs ({N_img} images)...")
             t_pre = time.time()
-            teacher_cache = np.empty_like(features_array)
+            if not isinstance(features_train, np.ndarray):
+                raise ValueError("teacher precompute requires stacked ndarray features")
+            teacher_cache = np.empty_like(features_train)
             with torch.no_grad():
                 for start in range(0, N_img, batch_size):
                     end = min(start + batch_size, N_img)
                     X_chunk = torch.from_numpy(
-                        features_array[start:end]).float().to(device)
+                        features_train[start:end]).float().to(device)
                     teacher_cache[start:end] = tail.forward_nograd(
                         X_chunk).cpu().numpy()
                     del X_chunk
@@ -636,17 +669,20 @@ def train_soft_pq(
                 print(f"  Teacher cache: {cache_gb:.1f} GB CPU "
                       f"({time.time() - t_pre:.1f}s)")
         elif verbose:
-            print("  Skipping teacher precompute (norm-only tail; on-the-fly per batch)")
+            print("  Skipping teacher precompute (norm-only / path-mode; on-the-fly)")
 
     val_array = None
     val_teacher_cache = None
     if val_features is not None and len(val_features) > 0:
         if isinstance(val_features, np.ndarray):
             val_array = val_features
+        elif _is_path_collection(val_features):
+            val_array = np.stack([_load_feature_item(val_features, i)
+                                  for i in range(len(val_features))])
         else:
             val_array = np.stack(val_features)
         if not use_mse_loss and precompute_teacher:
-            n_val = len(val_features)
+            n_val = val_array.shape[0]
             val_teacher_cache = np.empty_like(val_array)
             with torch.no_grad():
                 for vs in range(0, n_val, batch_size):
@@ -658,12 +694,13 @@ def train_soft_pq(
                     del X_v
             torch.cuda.empty_cache()
 
-    train_dataset = FeatureDataset(features_array, teacher_cache=teacher_cache)
+    train_dataset = FeatureDataset(features_train, teacher_cache=teacher_cache)
+    nw = 2 if path_mode else 2
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=2,
+        num_workers=nw,
         pin_memory=True,
         persistent_workers=True,
     )
@@ -704,37 +741,21 @@ def train_soft_pq(
             with torch.no_grad():
                 Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
 
-            Y_hat, usage = codec_forward(
-                Y, codec, n_prefix, prefix_bypass=patch_only,
-            )
-
-            if patch_only:
-                n_rate_tok = T - n_prefix
-                y_ref = Y[:, n_prefix:, :]
-                y_hat_ref = Y_hat[:, n_prefix:, :]
-            else:
-                n_rate_tok = T
-                y_ref = Y
-                y_hat_ref = Y_hat
+            Y_hat, usage = codec_forward(Y, codec)
 
             if use_mse_loss:
-                distortion = ((y_ref - y_hat_ref) ** 2).sum() / B
+                distortion = ((Y - Y_hat) ** 2).sum() / B
             else:
                 if Y_teacher is None:
                     with torch.no_grad():
                         Y_teacher = tail.forward_nograd(X)
                 X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
                 X_hat_out = tail(X_hat)
-                if patch_only:
-                    distortion = (
-                        (Y_teacher[:, n_prefix:] - X_hat_out[:, n_prefix:]) ** 2
-                    ).sum() / B
-                else:
-                    distortion = ((Y_teacher - X_hat_out) ** 2).sum() / B
+                distortion = ((Y_teacher - X_hat_out) ** 2).sum() / B
                 del Y_teacher, X_hat, X_hat_out
 
             if codec.use_rate:
-                rate_bits = codec._last_rate * n_rate_tok
+                rate_bits = codec._last_rate * T
                 loss = rate_bits + lmbda * distortion
             else:
                 loss = distortion
@@ -747,8 +768,8 @@ def train_soft_pq(
 
             total_distortion += distortion.item() * B
             if codec.use_rate:
-                total_rate += codec._last_rate.item() * n_rate_tok * B
-            total_tokens += B * n_rate_tok
+                total_rate += codec._last_rate.item() * T * B
+            total_tokens += B * T
             usage_acc += usage.detach()
 
             del X, Y, Mu, Std, Y_hat, loss, distortion
@@ -772,14 +793,9 @@ def train_soft_pq(
                     Y_v, Mu_v, Std_v = batch_normalize_gpu(
                         X_v, mode=norm_mode, n_prefix=n_prefix
                     )
-                    Yh_v, _ = codec_forward(
-                        Y_v, codec, n_prefix, prefix_bypass=patch_only,
-                    )
+                    Yh_v, _ = codec_forward(Y_v, codec)
                     if use_mse_loss:
-                        if patch_only:
-                            d_v = ((Y_v[:, n_prefix:] - Yh_v[:, n_prefix:]) ** 2).sum()
-                        else:
-                            d_v = ((Y_v - Yh_v) ** 2).sum()
+                        d_v = ((Y_v - Yh_v) ** 2).sum()
                         val_loss_sum += d_v.item() / Bv * Bv
                     else:
                         if val_teacher_cache is not None:
@@ -789,21 +805,14 @@ def train_soft_pq(
                             Yt_v = tail.forward_nograd(X_v)
                         Xh_v = batch_inv_normalize_gpu(Yh_v, Mu_v, Std_v)
                         Xo_v = tail.forward_nograd(Xh_v)
-                        if patch_only:
-                            d_v = (
-                                (Yt_v[:, n_prefix:] - Xo_v[:, n_prefix:]) ** 2
-                            ).sum()
-                        else:
-                            d_v = ((Yt_v - Xo_v) ** 2).sum()
+                        d_v = ((Yt_v - Xo_v) ** 2).sum()
                         val_loss_sum += d_v.item() / Bv * Bv
                         del Yt_v, Xh_v, Xo_v
                     del X_v, Y_v, Mu_v, Std_v, Yh_v
             val_loss = val_loss_sum / n_val
 
-        T_tokens = features_train[0].shape[0]
-        T_rate = T_tokens - n_prefix if patch_only else T_tokens
         rate_bits_bpt = avg_rate
-        rate_per_image = avg_rate * T_rate if codec.use_rate else 0.0
+        rate_per_image = avg_rate * T_tokens if codec.use_rate else 0.0
 
         epoch_info = {
             'epoch': epoch,
@@ -843,7 +852,7 @@ def train_soft_pq(
 # ================================================================
 
 def soft_pq_encode_decode(features, codec, norm_mode, device,
-                          chunk_images=None, n_prefix=0, prefix_bypass=False):
+                          chunk_images=None, n_prefix=0):
     """Encode/decode features using trained FeatureCodec (hard PQ at eval)."""
     codec.eval()
     N = len(features)
@@ -861,9 +870,7 @@ def soft_pq_encode_decode(features, codec, norm_mode, device,
             X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
             B = X.shape[0]
             Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
-            Y_hat, _ = codec_forward(
-                Y, codec, n_prefix, prefix_bypass=prefix_bypass,
-            )
+            Y_hat, _ = codec_forward(Y, codec)
             X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
             for i in range(B):
                 all_xhat.append(X_hat[i].cpu().numpy())

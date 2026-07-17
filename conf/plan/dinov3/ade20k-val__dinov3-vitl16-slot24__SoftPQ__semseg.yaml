@@ -44,7 +44,8 @@ model:
     pretrained: false
     ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.pth
   dino_codec:
-    type: cofai.latent_codecs.SoftPQLatentCodec
+    type: cofai.latent_codecs.SoftPQFeatureCodec
+    orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K256_e32.npz
   heads:
     semseg:
       type: Dinov3SegmentationHead
@@ -55,3 +56,37 @@ model:
       num_classes: 150
       patch_size: 16
       checkpoint: ${PROJECT_ROOT}/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+
+multi_run:
+  16:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K16_e32.npz
+  256:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K256_e32.npz
+  1024:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K1024_e32.npz
+  512_e16:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K512_e16.npz
+  1024_e16:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K1024_e16.npz
+  64_e8:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K64_e8.npz
+  256_e8:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K256_e8.npz
+  512_e8:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446_dinov3/release/blk23_K512_e8.npz

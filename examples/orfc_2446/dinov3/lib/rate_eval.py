@@ -24,8 +24,7 @@ except (ImportError, ModuleNotFoundError):
     _HAS_ANS = False
 
 
-def _codec_labels(features, codec, norm_mode, device, n_prefix=0, batch_size=32,
-                  prefix_bypass=False):
+def _codec_labels(features, codec, norm_mode, device, n_prefix=0, batch_size=32):
     codec.eval()
     is_latent = hasattr(codec, "R") and hasattr(codec, "_assign_labels")
     if is_latent:
@@ -43,17 +42,11 @@ def _codec_labels(features, codec, norm_mode, device, n_prefix=0, batch_size=32,
             if len({f.shape[0] for f in batch}) == 1:
                 X = torch.from_numpy(np.stack(batch)).float().to(device)
                 if is_latent:
-                    if prefix_bypass and n_prefix > 0:
-                        _, _, labels = codec._assign_labels(X[:, n_prefix:, :])
-                    else:
-                        _, _, labels = codec._assign_labels(X)
+                    _, _, labels = codec._assign_labels(X)
                     all_labels.append(labels.cpu())
                 else:
                     Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
-                    if prefix_bypass and n_prefix > 0:
-                        _ = codec(Y[:, n_prefix:, :])
-                    else:
-                        _ = codec(Y)
+                    _ = codec(Y)
                     all_labels.append(pq._last_labels.cpu())
                 del X
                 continue
@@ -61,17 +54,11 @@ def _codec_labels(features, codec, norm_mode, device, n_prefix=0, batch_size=32,
             for feat in batch:
                 X1 = torch.from_numpy(feat).float().unsqueeze(0).to(device)
                 if is_latent:
-                    if prefix_bypass and n_prefix > 0:
-                        _, _, labels = codec._assign_labels(X1[:, n_prefix:, :])
-                    else:
-                        _, _, labels = codec._assign_labels(X1)
+                    _, _, labels = codec._assign_labels(X1)
                     labels_parts.append(labels.cpu())
                 else:
                     Y, _, _ = batch_normalize_gpu(X1, mode=norm_mode, n_prefix=n_prefix)
-                    if prefix_bypass and n_prefix > 0:
-                        _ = codec(Y[:, n_prefix:, :])
-                    else:
-                        _ = codec(Y)
+                    _ = codec(Y)
                     labels_parts.append(pq._last_labels.cpu())
                 del X1
             all_labels.append(torch.cat(labels_parts, dim=1))
@@ -122,7 +109,6 @@ def evaluate_rate(
     embed_dim: int,
     device,
     sideinfo_bpi: float,
-    prefix_bypass: bool = False,
     require_sidecar: bool = False,
 ) -> dict:
     """Dataset-level rate using train PMF sidecar (preferred) + optional rANS.
@@ -138,7 +124,6 @@ def evaluate_rate(
         G, K = pq.G, pq.K
     labels = _codec_labels(
         features, codec, norm_mode, device, n_prefix=n_prefix,
-        prefix_bypass=prefix_bypass,
     )
     n_tokens = labels.shape[1]
 
@@ -207,5 +192,4 @@ def evaluate_rate(
         "bpfp_max": float(max_bpt / embed_dim + bpfp_si),
         "sideinfo_bpi": float(sideinfo_bpi),
         "n_tokens": int(n_tokens),
-        "prefix_bypass": bool(prefix_bypass),
     }

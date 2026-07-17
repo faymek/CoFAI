@@ -63,27 +63,29 @@ def compute_histogram_pmf(
     n_prefix: int = 0,
     device: Union[str, torch.device] = "cuda",
     batch_size: int = 200,
-    token_slice: str = "all",
 ) -> np.ndarray:
     """Count label histogram on train features; return ``pmf`` (G, K)."""
     codec.eval()
     pq = codec.pq
     G, K = pq.G, pq.K
     label_counts = np.zeros((G, K), dtype=np.int64)
-    patch_only = token_slice == "patch" and n_prefix > 0
 
     for start in range(0, len(features), batch_size):
         end = min(start + batch_size, len(features))
         if isinstance(features, np.ndarray):
             batch = features[start:end]
         else:
-            batch = np.stack(features[start:end])
+            items = []
+            for i in range(start, end):
+                item = features[i]
+                if isinstance(item, (str, Path)):
+                    items.append(np.load(item).astype(np.float32))
+                else:
+                    items.append(np.asarray(item, dtype=np.float32))
+            batch = np.stack(items)
         X = torch.from_numpy(batch).float().to(device)
         Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
-        if patch_only:
-            _ = codec(Y[:, n_prefix:, :])
-        else:
-            _ = codec(Y)
+        _ = codec(Y)
         labels = pq._last_labels.cpu().numpy()
         for g in range(G):
             for lbl in labels[g]:

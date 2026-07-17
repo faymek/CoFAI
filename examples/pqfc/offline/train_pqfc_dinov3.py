@@ -104,17 +104,14 @@ def _ckpt_name(args, bt_dim: int, D: int) -> str:
     rate_tag = f"_lmbda{args.lmbda}" if args.lmbda > 0 else ""
     norm_tag = f"_{args.norm_mode}" if args.norm_mode != "per_image" else ""
     tau_tag = f"_tau{args.tau_start}" if args.tau_start > 0 else ""
-    patch_tag = "_ptpatch" if args.train_tokens == "patch" else ""
     return (
         f"{args.layer}_K{args.K}_emb{args.embedding_dim}_{bt_tag}_{ws_tag}"
         f"{rate_tag}{norm_tag}{tau_tag}"
-        f"_lr{args.lr}_ep{args.epochs}_n{args.max_train}_s{args.seed}{patch_tag}.pt"
+        f"_lr{args.lr}_ep{args.epochs}_n{args.max_train}_s{args.seed}.pt"
     )
 
 
-def _norm_vectors_from_batch(Y: torch.Tensor, train_tokens: str, n_prefix: int, D: int) -> np.ndarray:
-    if train_tokens == "patch" and n_prefix > 0:
-        return Y[:, n_prefix:, :].reshape(-1, D).cpu().numpy()
+def _norm_vectors_from_batch(Y: torch.Tensor, D: int) -> np.ndarray:
     return Y.reshape(-1, D).cpu().numpy()
 
 
@@ -154,7 +151,7 @@ def train_and_save(args) -> str:
     print(f"# DINOv3 PQFC Training ({mode_str})")
     print(f"# layer={args.layer}  K={args.K}  d={args.embedding_dim}")
     print(f"# norm={args.norm_mode}  n_prefix={n_prefix}  λ={args.lmbda}")
-    print(f"# train_tokens={args.train_tokens}  use_transform={args.use_transform}")
+    print(f"# use_transform={args.use_transform}")
     print(f"# loss = R + λ·D  (D = ΔL_ref)")
     print(f"# feat_dir={feat_dir}")
     print(f"# token_hw={token_hw}")
@@ -206,8 +203,7 @@ def train_and_save(args) -> str:
     opq_usage = None
     R_opq = cb_opq = None
     if args.use_transform:
-        opq_scope = "patch" if args.train_tokens == "patch" else "all"
-        print(f"\n{'=' * 60}\n  [OPQ warm-start]  tokens={opq_scope}\n{'=' * 60}")
+        print(f"\n{'=' * 60}\n  [OPQ warm-start]\n{'=' * 60}")
         t0 = time.time()
         all_vectors = []
         for start in range(0, n_train, 200):
@@ -215,9 +211,7 @@ def train_and_save(args) -> str:
             X = torch.from_numpy(train_array[start:end]).float().to(device)
             with torch.no_grad():
                 Y, _, _ = batch_normalize_gpu(X, mode=args.norm_mode, n_prefix=n_prefix)
-            all_vectors.append(
-                _norm_vectors_from_batch(Y, args.train_tokens, n_prefix, D)
-            )
+            all_vectors.append(_norm_vectors_from_batch(Y, D))
             del X, Y
         full_vecs = np.concatenate(all_vectors, axis=0)
         del all_vectors
@@ -244,10 +238,7 @@ def train_and_save(args) -> str:
                 X = torch.from_numpy(train_array[start:end]).float().to(device)
                 with torch.no_grad():
                     Y, _, _ = batch_normalize_gpu(X, mode=args.norm_mode, n_prefix=n_prefix)
-                    if args.train_tokens == "patch" and n_prefix > 0:
-                        flat = Y[:, n_prefix:, :].reshape(-1, D) @ R_t
-                    else:
-                        flat = Y.reshape(-1, D) @ R_t
+                    flat = Y.reshape(-1, D) @ R_t
                     sub = flat.reshape(-1, G, args.embedding_dim).permute(1, 0, 2).contiguous()
                     lbl = batched_assign(sub, cb_t, device=device)[1].cpu().numpy()
                     for g in range(G):
@@ -304,7 +295,6 @@ def train_and_save(args) -> str:
         grad_clip=args.grad_clip,
         prior_floor=args.prior_floor,
         precompute_teacher=precompute_teacher,
-        train_tokens=args.train_tokens,
     )
     print(f"  Training done ({time.time() - t_spq:.1f}s)")
 
@@ -312,7 +302,6 @@ def train_and_save(args) -> str:
     if getattr(args, "keep_pt", False):
         save_codec(
             codec, str(ckpt_path),
-            train_tokens=args.train_tokens,
             use_transform=args.use_transform,
             norm_mode=args.norm_mode,
             n_prefix=n_prefix,
@@ -323,12 +312,10 @@ def train_and_save(args) -> str:
     with open(hist_path, "w") as f:
         json.dump(history, f, indent=2, default=str)
 
-    prefix_bypass = args.train_tokens == "patch" and n_prefix > 0
     val_metrics = eval_val_distortion(
         val_feats, codec, tail,
         norm_mode=args.norm_mode,
         n_prefix=n_prefix,
-        prefix_bypass=prefix_bypass,
         device=device,
         batch_size=args.batch_size,
     )
@@ -341,7 +328,6 @@ def train_and_save(args) -> str:
     del tail
     _cuda_release()
 
-    token_slice = "patch" if args.train_tokens == "patch" else "all"
     pmf = compute_histogram_pmf(
         codec,
         train_array,
@@ -349,7 +335,6 @@ def train_and_save(args) -> str:
         n_prefix=n_prefix,
         device=device,
         batch_size=args.batch_size,
-        token_slice=token_slice,
     )
     npz_path = save_codec_npz(
         codec,
@@ -360,8 +345,7 @@ def train_and_save(args) -> str:
         n_prefix=n_prefix,
     )
     print(f"  Official NPZ → {npz_path}")
-    print(f"  meta: norm_mode={args.norm_mode} n_prefix={n_prefix} "
-          f"train_tokens={args.train_tokens}")
+    print(f"  meta: norm_mode={args.norm_mode} n_prefix={n_prefix}")
     _cuda_release()
 
     print(f"  Val raw MSE = {val_metrics['raw_mse']:.6f}")
@@ -398,7 +382,6 @@ def main():
     p.add_argument("--max_train", type=int, default=defaults.get("max_train", 5000))
     p.add_argument("--n_val", type=int, default=defaults.get("n_val", 50))
     p.add_argument("--kmeans_max_samples", type=int, default=defaults.get("kmeans_max_samples", 2_000_000))
-    p.add_argument("--train_tokens", choices=("all", "patch"), default="all")
     p.add_argument("--use_transform", action="store_true", default=True,
                    help="Orthogonal R + soft PQ (default)")
     p.add_argument("--no_transform", dest="use_transform", action="store_false",

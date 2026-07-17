@@ -77,7 +77,6 @@ def _load_npz_codec(ckpt_path: Path, device: torch.device):
     ckpt_meta = {
         "norm_mode": payload["norm_mode"],
         "n_prefix": payload["n_prefix"],
-        "train_tokens": "all",
         "use_transform": True,
     }
     codec = SoftPQFeatureCodec(
@@ -136,13 +135,11 @@ def cmd_replay(args) -> None:
     stem_index = _build_stem_index(dataset, task, cfg)
 
     codec = None
-    train_tokens = "all"
     ckpt_meta: dict = {}
     if mode == "orfc":
         if not args.ckpt_path:
             _fail("--ckpt_path required for mode=orfc")
         codec, ckpt_meta = _load_npz_codec(Path(args.ckpt_path), device)
-        train_tokens = ckpt_meta.get("train_tokens", "all")
         print(f"[replay] loaded codec: {args.ckpt_path}")
 
     norm_mode, n_prefix, norm_src = resolve_norm_settings(
@@ -158,10 +155,6 @@ def cmd_replay(args) -> None:
         f"[replay] norm_mode={norm_mode}  n_prefix={n_prefix}  "
         f"(source={norm_src})"
     )
-
-    prefix_bypass = args.prefix_bypass
-    if prefix_bypass is None:
-        prefix_bypass = train_tokens == "patch"
 
     results_dir = Path(cfg["paths"]["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -192,7 +185,7 @@ def cmd_replay(args) -> None:
         if mode == "orfc":
             recon = encode_decode_single(
                 tokens, codec, norm_mode, device,
-                n_prefix=n_prefix, prefix_bypass=prefix_bypass,
+                n_prefix=n_prefix,
             )
             total_mse += float(np.mean((tokens - recon) ** 2))
             n_mse += 1
@@ -233,8 +226,6 @@ def cmd_replay(args) -> None:
         "n_prefix": n_prefix,
         "norm_source": norm_src,
         "n_samples": len(stems),
-        "train_tokens": train_tokens,
-        "prefix_bypass": prefix_bypass,
         "use_transform": use_transform,
         "metrics": metrics,
     }
@@ -251,7 +242,6 @@ def cmd_replay(args) -> None:
             embed_dim=cfg["embed_dim"],
             device=device,
             sideinfo_bpi=sideinfo_bpi,
-            prefix_bypass=prefix_bypass,
         )
         out["rate"] = rate
         rans = rate.get("rans_bpt")
@@ -347,9 +337,6 @@ def main():
     rp.add_argument("--norm_mode", choices=NORM_MODE_CHOICES, default=None,
                     help="Feature norm (default: auto from ckpt meta/filename)")
     rp.add_argument("--n_prefix", type=int, default=0)
-    rp.add_argument("--prefix_bypass", action="store_true", default=None,
-                    help="Skip PQ on prefix tokens (default: on for ptpatch ckpts)")
-    rp.add_argument("--no_prefix_bypass", dest="prefix_bypass", action="store_false")
     rp.add_argument("--gpu", type=int, default=0)
 
     rt = sub.add_parser("rate")

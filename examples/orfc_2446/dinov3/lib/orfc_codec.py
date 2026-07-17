@@ -115,7 +115,6 @@ def encode_decode_single(
     norm_mode: str,
     device,
     n_prefix: int = 0,
-    prefix_bypass: bool = False,
 ) -> np.ndarray:
     """Encode/decode one [T, D] feature array.
 
@@ -130,20 +129,11 @@ def encode_decode_single(
                 codec.norm_mode = norm_mode
             if hasattr(codec, "n_prefix"):
                 codec.n_prefix = int(n_prefix)
-            if prefix_bypass and n_prefix > 0 and feat_td.shape[0] > n_prefix:
-                # Compress patches only; keep prefix tokens raw
-                prefix = X[:, :n_prefix, :]
-                patches = X[:, n_prefix:, :]
-                patch_hat = codec(patches)["h_hat"]
-                x_hat = torch.cat([prefix, patch_hat], dim=1)
-            else:
-                x_hat = codec(X)["h_hat"]
+            x_hat = codec(X)["h_hat"]
             return x_hat.squeeze(0).cpu().numpy()
 
         Y, mu, std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
-        y_hat, _ = codec_forward(
-            Y, codec, n_prefix, prefix_bypass=prefix_bypass,
-        )
+        y_hat, _ = codec_forward(Y, codec)
         x_hat = batch_inv_normalize_gpu(y_hat, mu, std)
     return x_hat.squeeze(0).cpu().numpy()
 
@@ -155,7 +145,6 @@ def encode_decode_batch(
     device,
     n_prefix: int = 0,
     chunk_images: int | None = None,
-    prefix_bypass: bool = False,
 ) -> list[np.ndarray]:
     """Batch encode/decode when all features share the same shape."""
     return soft_pq_encode_decode(
@@ -165,7 +154,6 @@ def encode_decode_batch(
         device,
         chunk_images=chunk_images,
         n_prefix=n_prefix,
-        prefix_bypass=prefix_bypass,
     )
 
 
@@ -175,13 +163,12 @@ def encode_decode_variable(
     norm_mode: str,
     device,
     n_prefix: int = 0,
-    prefix_bypass: bool = False,
 ) -> list[np.ndarray]:
     """Per-image encode/decode for variable token lengths."""
     return [
         encode_decode_single(
             f, codec, norm_mode, device,
-            n_prefix=n_prefix, prefix_bypass=prefix_bypass,
+            n_prefix=n_prefix,
         )
         for f in features
     ]

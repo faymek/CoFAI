@@ -21,6 +21,23 @@ examples/**/log/
 *.yuv
 rec.yuv
 
+# ORFC-2446 DINOv3: experimental / diagnostics / RAEtail — not used by README workflows
+# (README depends on SoftPQ train/replay/online CTC only)
+examples/orfc_2446/dinov3/offline/eval_rae_dinov3.py
+examples/orfc_2446/dinov3/offline/train_raetail_cls_dinov3.py
+examples/orfc_2446/dinov3/scripts/analyze_token_rmse.py
+examples/orfc_2446/dinov3/scripts/compute_marginal_semseg_sensitivity.py
+examples/orfc_2446/dinov3/scripts/diagnose_distortion_alignment.py
+examples/orfc_2446/dinov3/scripts/run_export_raetail_npz.sh
+examples/orfc_2446/dinov3/scripts/run_extract_features_256px.sh
+examples/orfc_2446/dinov3/scripts/run_replay_eval.sh
+examples/orfc_2446/dinov3/scripts/run_replay_raetail_cls.sh
+examples/orfc_2446/dinov3/scripts/run_replay_rate_sweep.sh
+examples/orfc_2446/dinov3/scripts/run_train_no_transform.sh
+examples/orfc_2446/dinov3/scripts/run_train_pipeline.sh
+examples/orfc_2446/dinov3/scripts/run_train_raetail_cls.sh
+examples/orfc_2446/dinov3/scripts/run_train_rate_sweep.sh
+
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
@@ -45,6 +62,9 @@ eggs/
 lib/
 !examples/orfc_2446/dinov3/lib/
 !examples/orfc_2446/dinov3/lib/*.py
+# Re-ignore diagnosis-only helpers (must come after the !lib/*.py un-ignore)
+examples/orfc_2446/dinov3/lib/distortion_metrics.py
+examples/orfc_2446/dinov3/lib/token_mse_metrics.py
 !examples/pqfc/lib/
 !examples/pqfc/lib/*.py
 lib64/
