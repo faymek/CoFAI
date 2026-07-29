@@ -1,4 +1,0 @@
-# DINOv3 task heads + NYU depth dataset (backbone uses local .pth symlink; ADE20K already in data/)
-data/NYU_subset_for_training_depth_head.zip  sha256:0762c3ea
-weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth  sha256:98cd2ec1
-weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth  sha256:e8931641
