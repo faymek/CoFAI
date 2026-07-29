@@ -42,8 +42,8 @@ evaluator 从 collate 后的 batch meta 推导 grouped embedding 对应的样本
 
 特征码流使用真实 `RawDtypeCodec` 序列化，包括一个 CLS token 和全部 retained
 patch tokens。该 codec 通过 PyTorch 原生浮点 dtype 完成数值量化，再直接传输
-连续原始字节；当前配置为 `float16`，也支持 `bfloat16` 和 PyTorch 提供的
-`float8` dtype。码流保持 eval 引擎现有的扁平结构：
+连续原始字节；当前配置为 `float16`，也支持 `bfloat16`、
+`float8_e4m3fn` 和 `float8_e5m2`。码流保持 eval 引擎现有的扁平结构：
 
 ```python
 strings = {

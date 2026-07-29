@@ -40,8 +40,6 @@ class _PlainBackbone(nn.Module):
         ("bfloat16", 2),
         ("float8_e4m3fn", 1),
         ("float8_e5m2", 1),
-        ("float8_e4m3fnuz", 1),
-        ("float8_e5m2fnuz", 1),
     ],
 )
 def test_raw_dtype_codec_round_trip_uses_real_wire_bytes(
@@ -58,6 +56,7 @@ def test_raw_dtype_codec_round_trip_uses_real_wire_bytes(
 
     assert set(coded["strings"]) == {"feature"}
     assert "raw_output_device" not in coded["pstate"]
+    assert "raw_token_res" not in coded["pstate"]
     assert coded["pstate"]["raw_wire_dtype"] == wire_dtype
     assert isinstance(coded["strings"]["feature"][0][0], bytes)
     assert len(coded["strings"]["feature"][0][0]) == h.numel() * bytes_per_value
