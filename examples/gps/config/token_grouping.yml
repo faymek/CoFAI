@@ -3,8 +3,6 @@ token_grouping:
   token_count: 1323
   feature_dimension: 768
   feature_bit_depth: 16
-  metadata_bits: 128
-  restore_fill_value: 0.0
   timing_repeats: 20
   warmup: 5
 output_root: ${project_root:}/logs/gps

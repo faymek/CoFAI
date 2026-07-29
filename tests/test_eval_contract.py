@@ -29,6 +29,7 @@ def test_inference_x_real_returns_rec():
     )
     assert "rec" in task_feats
     assert "total_enc_time" in time_items
+    assert "total_dec_time" in time_items
     assert "a" in bits_items
 
 
@@ -41,7 +42,12 @@ def test_eval_model_fail_fast_missing_task_output():
 
     cfg = SimpleNamespace(args=SimpleNamespace(quality="1.0", real=False))
     model = DummyModel()
-    ctx = {"cfg": cfg, "tasks": ["not_returned"], "device": torch.device("cpu"), "task_specs": None}
+    ctx = {
+        "cfg": cfg,
+        "tasks": ["not_returned"],
+        "device": torch.device("cpu"),
+        "task_specs": None,
+    }
 
     batch = EvalBatch(
         inputs={"img": torch.zeros(1, 3, 2, 2)},

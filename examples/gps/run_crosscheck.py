@@ -80,7 +80,9 @@ def print_rate_table(root: Path, dataset: str) -> None:
     rows = load_json(dataset_root / "token_grouping.json")
     by_rho = {round(float(row["rho"]), 1): row for row in rows}
 
-    print(f"\n表 3-{1 if dataset == 'VeRi' else 2}  {DISPLAY_NAMES[dataset]}  代表性工作点的率-性能结果")
+    print(
+        f"\n表 3-{1 if dataset == 'VeRi' else 2}  {DISPLAY_NAMES[dataset]}  代表性工作点的率-性能结果"
+    )
     print("rho       K   R_keep   BPFP_total   码率节省       mAP    Rank-1")
     print("---------------------------------------------------------------------")
     for rho in DISPLAY_RHOS:
@@ -91,12 +93,16 @@ def print_rate_table(root: Path, dataset: str) -> None:
         map_value = (
             f"{float(row['mAP']):.3f}"
             if "mAP" in row
-            else fmt_percent(task["mAP"]) if "mAP" in task else "--"
+            else fmt_percent(task["mAP"])
+            if "mAP" in task
+            else "--"
         )
         rank1_value = (
             f"{float(row['R1']):.3f}"
             if "R1" in row
-            else fmt_percent(task["rank1"]) if "rank1" in task else "--"
+            else fmt_percent(task["rank1"])
+            if "rank1" in task
+            else "--"
         )
         kept_count = float(row.get("kept_count_mean", row.get("kept_tokens")))
         keep_ratio = float(row.get("keep_ratio_mean", row.get("keep_ratio")))
@@ -107,42 +113,29 @@ def print_rate_table(root: Path, dataset: str) -> None:
             f"{total_bpfp:>12.3f} {fmt_percent(saving):>10} "
             f"{map_value:>9} {rank1_value:>9}"
         )
-    print(f"dense checkpoint: mAP {fmt_percent(result['mAP'])}, Rank-1 {fmt_percent(result['rank1'])}")
+    print(
+        f"dense checkpoint: mAP {fmt_percent(result['mAP'])}, Rank-1 {fmt_percent(result['rank1'])}"
+    )
 
 
 def print_complexity_table(root: Path, datasets: list[str]) -> None:
-    print("\n表 3-3  结构恢复一致性与复杂度统计")
-    print(
-        "数据集       map recovery   预处理(ms/group)   "
-        "稀疏恢复(ms/group)   固定长度恢复(ms/group)"
-    )
-    print("--------------------------------------------------------------------------------------")
+    print("\n表 3-3  Selection map 一致性与复杂度统计")
+    print("数据集       map round-trip   预处理(ms/group)   map 解码(ms/group)")
+    print("-------------------------------------------------------------------")
     for dataset in datasets:
         rows = load_json(root / dataset / "token_grouping.json")
         rows = [row for row in rows if float(row["rho"]) > 0.0]
         if not rows:
-            print(
-                f"{DISPLAY_NAMES[dataset]:<12} {'--':>12} {'--':>17} "
-                f"{'--':>20} {'--':>24}"
-            )
+            print(f"{DISPLAY_NAMES[dataset]:<12} {'--':>14} {'--':>17} {'--':>20}")
             continue
-        if rows and "map_recovery_accuracy" in rows[0]:
-            recovery = min(float(row["map_recovery_accuracy"]) for row in rows)
-            preprocess = [float(row["preprocess_ms_mean"]) for row in rows]
-            sparse = [float(row["sparse_decode_restore_ms_mean"]) for row in rows]
-            fixed = [float(row["fixed_decode_restore_ms_mean"]) for row in rows]
-            preprocess_range = f"{min(preprocess):.3f} 至 {max(preprocess):.3f}"
-            sparse_range = f"{min(sparse):.3f} 至 {max(sparse):.3f}"
-            fixed_range = f"{min(fixed):.3f} 至 {max(fixed):.3f}"
-        else:
-            recovery = float(all(bool(row["map_recovery_exact"]) for row in rows))
-            restore_times = [1000.0 * float(row["restore_seconds"]) for row in rows]
-            preprocess_range = "--"
-            sparse_range = "--"
-            fixed_range = f"{min(restore_times):.3f} 至 {max(restore_times):.3f}"
+        recovery = min(float(row["map_recovery_accuracy"]) for row in rows)
+        preprocess = [float(row["preprocess_ms_mean"]) for row in rows]
+        decode = [float(row["map_decode_ms_mean"]) for row in rows]
+        preprocess_range = f"{min(preprocess):.3f} 至 {max(preprocess):.3f}"
+        decode_range = f"{min(decode):.3f} 至 {max(decode):.3f}"
         print(
-            f"{DISPLAY_NAMES[dataset]:<12} {fmt_percent(recovery):>12} "
-            f"{preprocess_range:>17} {sparse_range:>20} {fixed_range:>24}"
+            f"{DISPLAY_NAMES[dataset]:<12} {fmt_percent(recovery):>14} "
+            f"{preprocess_range:>17} {decode_range:>20}"
         )
 
 

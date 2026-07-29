@@ -6,12 +6,14 @@ from .mlore_codec import MLoREFeatureCodec, MLoREFeatureCodecLight
 from .bypass import BypassLatentCodec
 from .vqfc import VQFeatureCodec
 from .orfc import OrthoRotationFeatureCodec
+from .fp16 import FP16Codec
 
 __all__ = [
     "FeatureScaleHyperprior",
     "BypassLatentCodec",
     "VQFeatureCodec",
     "OrthoRotationFeatureCodec",
+    "FP16Codec",
     "VitUnionLatentCodec",
     "VitUnionLatentCodecWithCtx",
     "VitSeparateLatentCodec",
@@ -26,4 +28,3 @@ __all__ = [
     "MLoREFeatureCodec",
     "MLoREFeatureCodecLight",
 ]
-

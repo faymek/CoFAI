@@ -37,7 +37,12 @@ def conf_dir():
 
 def test_compose_default_dinov2(conf_dir):
     cfg = _compose_plan_cfg(
-        str(Path(conf_dir) / "plan/dinov2/ade20k-val__dinov2-vitb16-reg4-slot09__Bypass__semseg-last4.yaml"),
+        str(
+            Path(conf_dir)
+            / "plan"
+            / "dinov2"
+            / "ade20k-val__dinov2-vitb16-reg4-slot09__Bypass__semseg-last4.yaml"
+        ),
         [],
     )
     assert cfg.name == "ade20k-val__dinov2-vitb16-reg4-slot09__Bypass__semseg-last4"
@@ -46,7 +51,12 @@ def test_compose_default_dinov2(conf_dir):
 
 def test_compose_override_plan(conf_dir):
     cfg = _compose_plan_cfg(
-        str(Path(conf_dir) / "plan/dinov2/ade20k-val__dinov2-vitb16-slot09__MPC-vbr__semseg-last4.yaml"),
+        str(
+            Path(conf_dir)
+            / "plan"
+            / "dinov2"
+            / "ade20k-val__dinov2-vitb16-slot09__MPC-vbr__semseg-last4.yaml"
+        ),
         ["+args.max_samples=1"],
     )
     assert cfg.name == "ade20k-val__dinov2-vitb16-slot09__MPC-vbr__semseg-last4"

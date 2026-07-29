@@ -544,7 +544,8 @@ def run_eval(
     max_samples_i = int(ms) if ms is not None else None
 
     complexity: Dict[str, Any] = {}
-    if bool(cfg.args.profile) and hasattr(model, "codec_complexity"):
+    profile = bool(OmegaConf.select(cfg, "args.profile", default=False))
+    if profile and hasattr(model, "codec_complexity"):
         complexity = measure_codec_complexity(
             loader=loader,
             model=model,

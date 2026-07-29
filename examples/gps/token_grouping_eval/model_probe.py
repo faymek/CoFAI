@@ -7,6 +7,9 @@ from dataclasses import dataclass
 
 import torch
 
+from cofai.models import CommonFeatureCodecModel
+from examples.gps.reid.backbone import GPSReIDBackbone
+
 
 @dataclass
 class ProbeRecord:
@@ -54,14 +57,20 @@ class TokenGroupingProbe:
         )
         is_fused_query = bool(
             original_indices.numel()
-            and torch.all(view_indices.max(dim=1).values > view_indices.min(dim=1).values)
+            and torch.all(
+                view_indices.max(dim=1).values > view_indices.min(dim=1).values
+            )
         )
         if is_fused_query:
-            elapsed_per_group = self._batch_elapsed_ms / max(grouped.kept_indices.shape[0], 1)
+            elapsed_per_group = self._batch_elapsed_ms / max(
+                grouped.kept_indices.shape[0], 1
+            )
             for indices in grouped.kept_indices.detach().cpu().tolist():
                 kept = sorted(int(index) for index in indices)
                 if len(kept) != len(set(kept)):
-                    raise RuntimeError("selection map contains duplicate original indices")
+                    raise RuntimeError(
+                        "selection map contains duplicate original indices"
+                    )
                 self.records.append(
                     ProbeRecord(
                         n_tokens=3 * self.patches_per_view,
@@ -75,7 +84,12 @@ class TokenGroupingProbe:
 
 def install_token_grouping_probe(model) -> TokenGroupingProbe:
     """Install and return a collector on a GPS ReID model."""
-    base = model.base
-    probe = TokenGroupingProbe(base.token_grouper, base.patch_embed.num_patches)
-    base.token_grouper = probe
+    backbone = model.backbone if isinstance(model, CommonFeatureCodecModel) else model
+    if not isinstance(backbone, GPSReIDBackbone):
+        raise TypeError("token grouping probes require GPSReIDBackbone")
+    probe = TokenGroupingProbe(
+        backbone.token_grouper,
+        backbone.patches_per_view,
+    )
+    backbone.token_grouper = probe
     return probe

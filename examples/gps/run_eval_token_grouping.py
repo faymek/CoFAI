@@ -4,30 +4,28 @@ from __future__ import annotations
 
 import argparse
 import gc
-import sys
 import time
 from pathlib import Path
 
 import torch
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from cofai.token_codecs.token_selection_map import (
     decode_selection_indices,
     encode_selection_indices,
 )
 from examples.gps.config import load_config
+from examples.gps.model import build_codec_model
 from examples.gps.reid.dataloader import make_dataloader
 from examples.gps.reid.evaluator import evaluate_model
 from examples.gps.reid.legacy_config import build_legacy_config
-from examples.gps.reid.model import make_model
 from examples.gps.token_grouping_eval.model_probe import (
     ProbeRecord,
     install_token_grouping_probe,
 )
+from examples.gps.token_grouping_eval.bitrate import bitrate_record
 from examples.gps.token_grouping_eval.result_writer import write_csv, write_json
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,69 +44,35 @@ def mean(values) -> float:
     return 0.0 if not values else float(sum(values) / len(values))
 
 
-def benchmark_restore(
+def benchmark_selection_map(
     record: ProbeRecord,
-    feature_dim: int,
-    device: torch.device,
     repeats: int,
     warmup: int,
 ) -> dict[str, float]:
+    encoded_stream = None
     if len(record.kept_indices) == record.n_tokens:
-        return {
-            "map_recovery": 1.0,
-            "sparse_decode_restore_ms": 0.0,
-            "fixed_decode_restore_ms": 0.0,
-        }
-
-    encoded = encode_selection_indices(record.kept_indices, record.n_tokens)
-    decoded = decode_selection_indices(encoded)
+        decoded = record.kept_indices
+    else:
+        encoded_stream = encode_selection_indices(
+            record.kept_indices,
+            record.n_tokens,
+        ).to_bytes()
+        decoded = decode_selection_indices(encoded_stream)
     if decoded != record.kept_indices:
         raise RuntimeError("selection-map round trip failed")
 
-    indices = torch.tensor(decoded, dtype=torch.long, device=device)
-    tokens = torch.randn(
-        len(decoded),
-        feature_dim,
-        dtype=torch.float16 if device.type == "cuda" else torch.float32,
-        device=device,
-    )
-
-    def restore_once() -> torch.Tensor:
-        restored = torch.zeros(record.n_tokens, feature_dim, dtype=tokens.dtype, device=device)
-        restored.index_copy_(0, indices, tokens)
-        return restored
-
-    for _ in range(warmup):
-        decode_selection_indices(encoded)
-        restore_once()
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
-
     parse_times = []
-    restore_times = []
-    for _ in range(repeats):
-        start = time.perf_counter()
-        decode_selection_indices(encoded)
-        parse_times.append((time.perf_counter() - start) * 1000.0)
-
-        if device.type == "cuda":
-            event_start = torch.cuda.Event(enable_timing=True)
-            event_end = torch.cuda.Event(enable_timing=True)
-            event_start.record()
-            restore_once()
-            event_end.record()
-            torch.cuda.synchronize(device)
-            restore_times.append(float(event_start.elapsed_time(event_end)))
-        else:
+    if encoded_stream is not None:
+        for _ in range(warmup):
+            decode_selection_indices(encoded_stream)
+        for _ in range(repeats):
             start = time.perf_counter()
-            restore_once()
-            restore_times.append((time.perf_counter() - start) * 1000.0)
+            decode_selection_indices(encoded_stream)
+            parse_times.append((time.perf_counter() - start) * 1000.0)
 
-    parse_ms = mean(parse_times)
     return {
         "map_recovery": 1.0,
-        "sparse_decode_restore_ms": parse_ms,
-        "fixed_decode_restore_ms": parse_ms + mean(restore_times),
+        "map_decode_ms": mean(parse_times),
     }
 
 
@@ -118,37 +82,51 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
 
     feature_dim = int(tg.feature_dimension)
     bit_depth = int(tg.feature_bit_depth)
-    metadata_bits = int(tg.metadata_bits)
     bitrate_rows = []
     for record in records:
         kept_count = len(record.kept_indices)
-        dense_bits = record.n_tokens * feature_dim * bit_depth + metadata_bits
         if kept_count == record.n_tokens:
             map_bits = 0
         else:
             map_bits = encode_selection_indices(
                 record.kept_indices, record.n_tokens
-            ).payload_bits
-        feature_bits = kept_count * feature_dim * bit_depth
-        total_bits = feature_bits + map_bits + metadata_bits
+            ).stream_bits
+        # The transmitted compact tensor contains one CLS token in addition to
+        # every retained patch token.
+        feature_bits = (kept_count + 1) * feature_dim * bit_depth
         bitrate_rows.append(
-            {
-                "kept_count": kept_count,
-                "keep_ratio": kept_count / record.n_tokens,
-                "bpfp_feat": feature_bits / record.n_tokens,
-                "bpfp_map": (map_bits + metadata_bits) / record.n_tokens,
-                "bpfp_total": total_bits / record.n_tokens,
-                "eta_map": (map_bits + metadata_bits) / total_bits,
-                "rate_saving": 1.0 - total_bits / dense_bits,
-            }
+            bitrate_record(
+                token_count=record.n_tokens,
+                kept_tokens=kept_count,
+                feature_bits=feature_bits,
+                map_bits=map_bits,
+                dense_feature_bits=(record.n_tokens + 1) * feature_dim * bit_depth,
+            )
         )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    restore_rows = [
-        benchmark_restore(
+    coded_groups = int(task.get("coded_groups", 0))
+    if coded_groups != len(records):
+        raise RuntimeError(
+            "real codec/query grouping mismatch: "
+            f"{coded_groups} coded groups versus {len(records)} selection records"
+        )
+    actual_bits = dict(task.get("bits") or {})
+    expected_fp16 = sum(int(row["feature_bits"]) for row in bitrate_rows)
+    expected_map = sum(int(row["map_bits"]) for row in bitrate_rows)
+    if actual_bits.get("fp16") != float(expected_fp16):
+        raise RuntimeError(
+            f"FP16 stream mismatch: expected {expected_fp16}, got "
+            f"{actual_bits.get('fp16')}"
+        )
+    if actual_bits.get("selection_map", 0.0) != float(expected_map):
+        raise RuntimeError(
+            f"selection-map stream mismatch: expected {expected_map}, got "
+            f"{actual_bits.get('selection_map', 0.0)}"
+        )
+
+    map_rows = [
+        benchmark_selection_map(
             record,
-            feature_dim,
-            device,
             repeats=int(tg.timing_repeats),
             warmup=int(tg.warmup),
         )
@@ -162,21 +140,16 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
         "R10": 100.0 * float(task["rank10"]),
         "num_groups": len(records),
         "n_tokens": records[0].n_tokens,
-        "kept_count_mean": mean(row["kept_count"] for row in bitrate_rows),
+        "kept_count_mean": mean(row["kept_tokens"] for row in bitrate_rows),
         "keep_ratio_mean": mean(row["keep_ratio"] for row in bitrate_rows),
-        "bpfp_feat_mean": mean(row["bpfp_feat"] for row in bitrate_rows),
-        "bpfp_map_mean": mean(row["bpfp_map"] for row in bitrate_rows),
-        "bpfp_total_mean": mean(row["bpfp_total"] for row in bitrate_rows),
-        "eta_map_mean": mean(row["eta_map"] for row in bitrate_rows),
+        "bpfp_feat_mean": mean(row["feature_bpfp"] for row in bitrate_rows),
+        "bpfp_map_mean": mean(row["map_bpfp"] for row in bitrate_rows),
+        "bpfp_total_mean": mean(row["total_bpfp"] for row in bitrate_rows),
+        "eta_map_mean": mean(row["side_information_fraction"] for row in bitrate_rows),
         "rate_saving_mean": mean(row["rate_saving"] for row in bitrate_rows),
-        "map_recovery_accuracy": mean(row["map_recovery"] for row in restore_rows),
+        "map_recovery_accuracy": mean(row["map_recovery"] for row in map_rows),
         "preprocess_ms_mean": mean(record.preprocess_ms for record in records),
-        "sparse_decode_restore_ms_mean": mean(
-            row["sparse_decode_restore_ms"] for row in restore_rows
-        ),
-        "fixed_decode_restore_ms_mean": mean(
-            row["fixed_decode_restore_ms"] for row in restore_rows
-        ),
+        "map_decode_ms_mean": mean(row["map_decode_ms"] for row in map_rows),
     }
 
 
@@ -190,8 +163,11 @@ def main() -> None:
 
     base_legacy_cfg = build_legacy_config(cfg)
     loaders = make_dataloader(base_legacy_cfg)
-    _, _, _, query_loader, gallery_loader, _, num_query, num_classes, camera_num, view_num = loaders
-    rhos = args.rho if args.rho is not None else [float(value) for value in cfg.token_grouping.rho]
+    rhos = (
+        args.rho
+        if args.rho is not None
+        else [float(value) for value in cfg.token_grouping.rho]
+    )
     rows = []
     output = args.output or (
         PROJECT_ROOT / "logs" / "gps" / str(cfg.dataset.name) / "token_grouping.csv"
@@ -202,16 +178,23 @@ def main() -> None:
             raise ValueError(f"rho must be in [0, 1), got {rho}")
         cfg.model.pruning_ratios = [float(rho)] * len(cfg.model.pruning_layers)
         legacy_cfg = build_legacy_config(cfg)
-        model = make_model(
+        model = build_codec_model(
+            cfg,
             legacy_cfg,
-            num_class=num_classes,
-            camera_num=camera_num,
-            view_num=view_num,
+            num_classes=loaders.num_classes,
+            camera_num=loaders.camera_num,
+            view_num=loaders.view_num,
         )
-        model.load_param(str(cfg.checkpoint))
         probe = install_token_grouping_probe(model)
         print(f"\nEvaluating {cfg.dataset.name} at rho={rho:.1f}")
-        task = evaluate_model(legacy_cfg, model, query_loader, gallery_loader, num_query)
+        task = evaluate_model(
+            legacy_cfg,
+            model,
+            loaders.query,
+            loaders.gallery,
+            loaders.num_query,
+            real_codec=True,
+        )
         row = summarize_run(probe.records, task, cfg.token_grouping, rho)
         rows.append(row)
         write_csv(output, rows)
@@ -219,12 +202,13 @@ def main() -> None:
         print(
             f"rho={rho:.1f} K={row['kept_count_mean']:.1f} "
             f"BPFP={row['bpfp_total_mean']:.3f} mAP={row['mAP']:.3f} "
-            f"R1={row['R1']:.3f} recovery={row['map_recovery_accuracy']:.1%}"
+            f"R1={row['R1']:.3f} map={row['map_recovery_accuracy']:.1%}"
         )
         del model
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
 
 if __name__ == "__main__":
     main()

@@ -2,10 +2,13 @@ name: veri
 description: GPS multi-view evaluation on VeRi-776
 data_root: ${project_root:}/data
 checkpoint: ${project_root:}/weights/gps/VeRi/transformer.pth
-pretrained_backbone: ${project_root:}/weights/gps/imagenet_pretrain.pth
+codec_model:
+  type: CommonFeatureCodecModel
+  codec:
+    type: cofai.latent_codecs.FP16Codec
+  post_process: null
 dataset:
   name: veri
-  subset: null
 model:
   image_size: [256, 256]
   stride_size: [12, 12]

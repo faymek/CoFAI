@@ -22,8 +22,11 @@ def build_legacy_config(cfg, checkpoint: str | None = None):
             "descrip": "gps_multi_view",
             "cls_token_num": 1,
             "MODEL": {
-                "PRETRAIN_CHOICE": "imagenet",
-                "PRETRAIN_PATH": str(cfg.pretrained_backbone),
+                # Evaluation immediately loads the task checkpoint, so requiring a
+                # second ImageNet checkpoint only makes the documented eval inputs
+                # incomplete.
+                "PRETRAIN_CHOICE": "none",
+                "PRETRAIN_PATH": "",
                 "METRIC_LOSS_TYPE": "triplet",
                 "ID_LOSS_TYPE": "none",
                 "IF_LABELSMOOTH": "off",
@@ -64,7 +67,6 @@ def build_legacy_config(cfg, checkpoint: str | None = None):
             "DATASETS": {
                 "NAMES": str(data.name),
                 "ROOT_DIR": str(cfg.data_root),
-                "SUBSET": data.subset,
             },
             "DATALOADER": {
                 "NUM_WORKERS": int(evaluation.workers),

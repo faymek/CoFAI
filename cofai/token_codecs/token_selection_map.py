@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil, log2
+from struct import Struct
 
-import torch
-
-
-@dataclass(frozen=True)
-class SelectionMapPacket:
-    token_count: int
-    indices: tuple[int, ...]
+_STREAM_HEADER = Struct(">4sBII")
+_STREAM_MAGIC = b"TSM1"
+_CODING_TO_ID = {"bitmap": 0, "index": 1}
+_ID_TO_CODING = {value: key for key, value in _CODING_TO_ID.items()}
 
 
 @dataclass(frozen=True)
@@ -25,44 +23,51 @@ class EncodedSelectionMap:
     def payload_bits(self) -> int:
         return len(self.payload) * 8
 
+    @property
+    def stream_bits(self) -> int:
+        """Return the size of the independently decodable byte stream."""
+        return len(self.to_bytes()) * 8
 
-def encode_selection_map(mask: torch.Tensor) -> bytes:
-    """Encode a boolean map as a compact bitmap with a two-field header."""
-    if mask.ndim != 1 or mask.dtype != torch.bool:
-        raise ValueError("mask must be a one-dimensional boolean tensor")
-    token_count = int(mask.numel())
-    payload = bytearray((token_count + 7) // 8)
-    for index, selected in enumerate(mask.tolist()):
-        if selected:
-            payload[index // 8] |= 1 << (index % 8)
-    return token_count.to_bytes(4, "big") + bytes(payload)
+    def to_bytes(self) -> bytes:
+        """Serialize the coding choice, dimensions, and payload."""
+        try:
+            coding_id = _CODING_TO_ID[self.coding]
+        except KeyError as exc:
+            raise ValueError(
+                f"unsupported selection-map coding: {self.coding}"
+            ) from exc
+        if not 0 < self.token_count <= 0xFFFFFFFF:
+            raise ValueError("token_count must fit in an unsigned 32-bit integer")
+        if not 0 <= self.kept_count <= self.token_count:
+            raise ValueError("kept_count must be within token_count")
+        return (
+            _STREAM_HEADER.pack(
+                _STREAM_MAGIC,
+                coding_id,
+                self.token_count,
+                self.kept_count,
+            )
+            + self.payload
+        )
 
-
-def decode_selection_map(stream: bytes) -> torch.Tensor:
-    """Decode a bitmap produced by :func:`encode_selection_map`."""
-    if len(stream) < 4:
-        raise ValueError("selection-map stream is truncated")
-    token_count = int.from_bytes(stream[:4], "big")
-    payload_size = (token_count + 7) // 8
-    if len(stream) != 4 + payload_size:
-        raise ValueError("selection-map stream has an invalid length")
-    mask = torch.zeros(token_count, dtype=torch.bool)
-    for index in range(token_count):
-        mask[index] = bool(stream[4 + index // 8] & (1 << (index % 8)))
-    return mask
-
-
-def packet_from_indices(indices: torch.Tensor, token_count: int) -> SelectionMapPacket:
-    """Create a canonical, sorted selection packet."""
-    if indices.ndim != 1 or torch.any(indices < 0) or torch.any(indices >= token_count):
-        raise ValueError("indices must be one-dimensional and within token_count")
-    values = sorted(set(int(value) for value in indices.tolist()))
-    return SelectionMapPacket(token_count=token_count, indices=tuple(values))
-
-
-def selection_map_bits(mask: torch.Tensor) -> int:
-    """Return the exact number of bits in the bitmap stream."""
-    return len(encode_selection_map(mask)) * 8
+    @classmethod
+    def from_bytes(cls, stream: bytes | bytearray | memoryview) -> EncodedSelectionMap:
+        """Parse a self-contained selection-map stream."""
+        stream = bytes(stream)
+        if len(stream) < _STREAM_HEADER.size:
+            raise ValueError("selection-map stream is truncated")
+        magic, coding_id, token_count, kept_count = _STREAM_HEADER.unpack_from(stream)
+        if magic != _STREAM_MAGIC:
+            raise ValueError("selection-map stream has an invalid magic")
+        try:
+            coding = _ID_TO_CODING[coding_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"unsupported selection-map coding id: {coding_id}"
+            ) from exc
+        encoded = cls(coding, token_count, kept_count, stream[_STREAM_HEADER.size :])
+        _validate_encoded_payload(encoded)
+        return encoded
 
 
 def _validate_indices(indices, token_count: int) -> list[int]:
@@ -92,6 +97,9 @@ def _pack_fixed_width(values: list[int], width: int) -> bytes:
 
 
 def _unpack_fixed_width(payload: bytes, count: int, width: int) -> list[int]:
+    expected_size = ceil(count * width / 8)
+    if len(payload) != expected_size:
+        raise ValueError("index payload has an invalid length")
     values = []
     accumulator = 0
     accumulated_bits = 0
@@ -106,6 +114,8 @@ def _unpack_fixed_width(payload: bytes, count: int, width: int) -> list[int]:
             accumulator &= (1 << accumulated_bits) - 1 if accumulated_bits else 0
     if len(values) != count:
         raise ValueError("index payload is truncated")
+    if accumulator:
+        raise ValueError("index payload has non-zero padding bits")
     return values
 
 
@@ -122,8 +132,29 @@ def encode_selection_indices(indices, token_count: int) -> EncodedSelectionMap:
     return EncodedSelectionMap("bitmap", token_count, len(values), bytes(bitmap))
 
 
-def decode_selection_indices(encoded: EncodedSelectionMap) -> list[int]:
-    """Decode an index set produced by :func:`encode_selection_indices`."""
+def _validate_encoded_payload(encoded: EncodedSelectionMap) -> None:
+    if encoded.token_count <= 0:
+        raise ValueError("token_count must be positive")
+    if not 0 <= encoded.kept_count <= encoded.token_count:
+        raise ValueError("kept_count must be within token_count")
+    if encoded.coding == "index":
+        width = max(1, ceil(log2(encoded.token_count)))
+        expected_size = ceil(encoded.kept_count * width / 8)
+    elif encoded.coding == "bitmap":
+        expected_size = ceil(encoded.token_count / 8)
+    else:
+        raise ValueError(f"unsupported selection-map coding: {encoded.coding}")
+    if len(encoded.payload) != expected_size:
+        raise ValueError(f"{encoded.coding} payload has an invalid length")
+
+
+def decode_selection_indices(
+    encoded: EncodedSelectionMap | bytes | bytearray | memoryview,
+) -> list[int]:
+    """Decode an encoded object or an independently decodable byte stream."""
+    if not isinstance(encoded, EncodedSelectionMap):
+        encoded = EncodedSelectionMap.from_bytes(encoded)
+    _validate_encoded_payload(encoded)
     if encoded.coding == "index":
         values = _unpack_fixed_width(
             encoded.payload,
@@ -131,9 +162,6 @@ def decode_selection_indices(encoded: EncodedSelectionMap) -> list[int]:
             max(1, ceil(log2(encoded.token_count))),
         )
     elif encoded.coding == "bitmap":
-        expected_size = ceil(encoded.token_count / 8)
-        if len(encoded.payload) != expected_size:
-            raise ValueError("bitmap payload has an invalid length")
         values = [
             index
             for index in range(encoded.token_count)

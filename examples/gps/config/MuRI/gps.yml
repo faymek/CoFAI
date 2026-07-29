@@ -2,10 +2,13 @@ name: muri
 description: GPS multi-view evaluation on MuRI
 data_root: ${project_root:}/data
 checkpoint: ${project_root:}/weights/gps/MuRI/transformer.pth
-pretrained_backbone: ${project_root:}/weights/gps/imagenet_pretrain.pth
+codec_model:
+  type: CommonFeatureCodecModel
+  codec:
+    type: cofai.latent_codecs.FP16Codec
+  post_process: null
 dataset:
   name: muri
-  subset: null
 model:
   image_size: [256, 256]
   stride_size: [12, 12]
