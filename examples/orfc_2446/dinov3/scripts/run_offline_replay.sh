@@ -1,37 +1,35 @@
 #!/bin/bash
-# Unified DINOv3 SoftPQ offline eval: semantic segmentation + depth.
+# DINOv3 ORFC offline replay diagnostic: semantic segmentation + depth.
 #
-# Parametric entry (env vars). Prefers SoftPQ ``.npz``; falls back to sibling
-# ``.pt`` only when ``.npz`` is missing (replay will still require PMF in practice).
+# Formal reference evaluation is driven by ``cofai-eval`` plans. This script
+# replays previously extracted features for offline diagnostics only.
 #
 # Usage:
 #   # Evaluate specific checkpoints on both tasks
-#   CKPTS="weights/orfc_2446_dinov3/a.npz weights/orfc_2446_dinov3/b.npz" \
+#   CKPTS="weights/orfc_2446/dinov3_vitl16/a.npz weights/orfc_2446/dinov3_vitl16/b.npz" \
 #   TASKS=semseg,depth GPUS=0,1,2,3 \
-#   bash examples/orfc_2446/dinov3/scripts/run_eval_tasks.sh
+#   bash examples/orfc_2446/dinov3/scripts/run_offline_replay.sh
 #
 #   # Single task / single GPU
-#   CKPTS=weights/orfc_2446_dinov3/foo.npz TASKS=semseg GPUS=0 \
-#   bash examples/orfc_2446/dinov3/scripts/run_eval_tasks.sh
+#   CKPTS=weights/orfc_2446/dinov3_vitl16/foo.npz TASKS=semseg GPUS=0 \
+#   bash examples/orfc_2446/dinov3/scripts/run_offline_replay.sh
 #
-#   # Override norm (default: auto from npz meta / filename)
-#   NORM=split_reg_cls_patch CKPTS=... bash .../run_eval_tasks.sh
+#   # Override norm (default: read from the artifact)
+#   NORM=split_reg_cls_patch CKPTS=... bash .../run_offline_replay.sh
 
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 export MKL_NUM_THREADS=1
 export OMP_NUM_THREADS=1
-unset PYTHONPATH
 
-ROOT="${PROJECT_ROOT:-/data4/workspace/zlt/featcodec/CoFAI}"
-cd "$ROOT"
-export PROJECT_ROOT="$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+cd "$COFAI_ROOT"
 
-PYTHON="${PYTHON:-poetry run python}"
-CFG="${CFG:-examples/orfc_2446/dinov3/configs/dinov3_blk23.yaml}"
-REPLAY_PY="examples/orfc_2446/dinov3/run_orfc_dinov3.py"
-LOG_DIR="${LOG_DIR:-examples/orfc_2446/dinov3/logs/eval_tasks}"
-RESULTS_DIR="${RESULTS_DIR:-examples/orfc_2446/dinov3/results}"
+CFG="${CFG:-$COFAI_ROOT/examples/orfc_2446/dinov3/configs/dinov3_blk23.yaml}"
+REPLAY_PY="$COFAI_ROOT/examples/orfc_2446/dinov3/offline/replay.py"
+LOG_DIR="${LOG_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov3/offline_replay}"
+RESULTS_DIR="${RESULTS_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov3/offline_replay/results}"
 mkdir -p "$LOG_DIR" "$RESULTS_DIR"
 
 NORM="${NORM:-}"   # empty => auto from ckpt meta/filename
@@ -39,32 +37,21 @@ IFS=',' read -r -a TASK_ARR <<< "${TASKS:-semseg,depth}"
 IFS=',' read -r -a GPU_ARR <<< "${GPUS:-0}"
 
 if [[ -z "${CKPTS:-}" ]]; then
-  echo "[ERROR] Set CKPTS to one or more SoftPQ .npz (or .pt) paths." >&2
+  echo "[ERROR] Set CKPTS to one or more ORFC .npz paths." >&2
   exit 1
 fi
 # shellcheck disable=SC2206
 CKPT_ARR=( $CKPTS )
 
-resolve_ckpt() {
-  local p=$1
-  if [[ -f "$p" ]]; then
-    echo "$p"
-    return
-  fi
-  if [[ "$p" == *.pt && -f "${p%.pt}.npz" ]]; then
-    echo "${p%.pt}.npz"
-    return
-  fi
-  if [[ "$p" == *.npz && -f "${p%.npz}.pt" ]]; then
-    echo "${p%.npz}.pt"
-    return
-  fi
-  echo "$p"
-}
-
 JOBS=()
 for ckpt in "${CKPT_ARR[@]}"; do
-  ckpt="$(resolve_ckpt "$ckpt")"
+  if [[ "$ckpt" != /* ]]; then
+    ckpt="$COFAI_ROOT/$ckpt"
+  fi
+  if [[ "$ckpt" != *.npz ]]; then
+    echo "[ERROR] offline replay accepts released .npz artifacts only: $ckpt" >&2
+    exit 1
+  fi
   if [[ ! -f "$ckpt" ]]; then
     echo "[ERROR] missing ckpt: $ckpt" >&2
     exit 1
@@ -75,7 +62,7 @@ for ckpt in "${CKPT_ARR[@]}"; do
 done
 
 echo "============================================================"
-echo "  DINOv3 SoftPQ task eval"
+echo "  DINOv3 ORFC offline replay"
 echo "  tasks=${TASK_ARR[*]}  ckpts=${#CKPT_ARR[@]}  jobs=${#JOBS[@]}"
 echo "  gpus=${GPU_ARR[*]}  norm=${NORM:-auto}"
 echo "  Started: $(date)"
@@ -94,9 +81,10 @@ for i in "${!JOBS[@]}"; do
     NORM_ARGS=(--norm_mode "$NORM")
   fi
   CUDA_VISIBLE_DEVICES="$gpu" \
-  $PYTHON "$REPLAY_PY" --config "$CFG" replay \
+  poetry -C "$COFAI_ROOT" run python "$REPLAY_PY" --config "$CFG" replay \
     --task "$task" --mode orfc \
     --ckpt_path "$ckpt" \
+    --results_dir "$RESULTS_DIR" \
     "${NORM_ARGS[@]}" --gpu 0 \
     > "$log" 2>&1 &
   pids+=($!)
@@ -115,7 +103,7 @@ done
 
 echo ""
 echo "========== SUMMARY =========="
-$PYTHON - "$RESULTS_DIR" "${CKPT_ARR[@]}" << 'PY'
+poetry -C "$COFAI_ROOT" run python - "$RESULTS_DIR" "${CKPT_ARR[@]}" << 'PY'
 import json
 import sys
 from pathlib import Path

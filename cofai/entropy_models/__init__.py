@@ -2,15 +2,7 @@ from .vqfc_entropy import SoftmaxPrior, DiscreteEntropyModel
 from .vqfc_model import VQFC, VectorQuantizer, BaseVAE, RESVQ
 from .dcvc_entropy import VbrFactorizedPrior, GaussianEncoder, EntropyCoder
 from .dcvc_base import DmcCompressionModel
-from .orfc_model import (
-    batch_normalize_gpu, batch_inv_normalize_gpu,
-    batched_kmeans, batched_assign,
-    learn_pca_rotation, learn_orfc_rotation,
-)
-from .soft_pq import (
-    FeatureTransform, OrthogonalTransform, SoftPQ, FeatureCodec,
-    FrozenTail, train_soft_pq, soft_pq_encode_decode, save_codec, load_codec,
-)
+from .static_categorical import StaticCategoricalEntropyModel
 
 __all__ = [
     "SoftmaxPrior",
@@ -23,19 +15,5 @@ __all__ = [
     "GaussianEncoder",
     "EntropyCoder",
     "DmcCompressionModel",
-    "batch_normalize_gpu",
-    "batch_inv_normalize_gpu",
-    "batched_kmeans",
-    "batched_assign",
-    "learn_pca_rotation",
-    "learn_orfc_rotation",
-    "FeatureTransform",
-    "OrthogonalTransform",
-    "SoftPQ",
-    "FeatureCodec",
-    "FrozenTail",
-    "train_soft_pq",
-    "soft_pq_encode_decode",
-    "save_codec",
-    "load_codec",
+    "StaticCategoricalEntropyModel",
 ]

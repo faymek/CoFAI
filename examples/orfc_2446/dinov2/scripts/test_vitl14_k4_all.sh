@@ -6,23 +6,22 @@
 #
 # Usage:
 #   bash examples/orfc_2446/dinov2/scripts/test_vitl14_k4_all.sh
-#   GPU_IDS=0,1,2,3 PYTHON=.venv/bin/python \
+#   GPU_IDS=0,1,2,3 \
 #       bash examples/orfc_2446/dinov2/scripts/test_vitl14_k4_all.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ORFC2446_DIR="$(dirname "$SCRIPT_DIR")"
-OFFLINE_DIR="$ORFC2446_DIR/offline"
-COFAI_ROOT="$(dirname "$(dirname "$(dirname "$ORFC2446_DIR")")")"
-FEATCODEC_ROOT="$(dirname "$COFAI_ROOT")"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
-FEAT_ROOT="${FEAT_ROOT:-$FEATCODEC_ROOT/features}"
-SEG_FEAT_ROOT="${SEG_FEAT_ROOT:-$FEATCODEC_ROOT/features/voc2012_100}"
+ORFC2446_DIR="$COFAI_ROOT/examples/orfc_2446/dinov2"
+OFFLINE_DIR="$ORFC2446_DIR/offline"
+
+FEAT_ROOT="${FEAT_ROOT:-$COFAI_ROOT/features}"
+SEG_FEAT_ROOT="${SEG_FEAT_ROOT:-$COFAI_ROOT/features/voc2012_100}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-$COFAI_ROOT/weights/orfc_2446/dinov2_vitl14}"
-PYTHON="${PYTHON:-python}"
 GPU_IDS="${GPU_IDS:-0,1,2,3}"
 
-LOG_DIR="$ORFC2446_DIR/logs/test_vitl14_k4"
+LOG_DIR="${LOG_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov2/test_vitl14_k4}"
 mkdir -p "$LOG_DIR/cls" "$LOG_DIR/seg"
 
 BACKBONE="dinov2_vitl14"
@@ -92,14 +91,14 @@ run_job() {
     local log="$LOG_DIR/${task}/${tag}.log"
 
     if [ "$task" = "cls" ]; then
-        CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON "$OFFLINE_DIR/test_cls.py" \
+        CUDA_VISIBLE_DEVICES=$gpu_id poetry -C "$COFAI_ROOT" run python "$OFFLINE_DIR/test_cls.py" \
             --backbone "$BACKBONE" \
             --layer "$layer" \
             --ckpt_path "$ckpt" \
             --feat_root "$FEAT_ROOT" \
             > "$log" 2>&1
     else
-        CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON "$OFFLINE_DIR/test_seg.py" \
+        CUDA_VISIBLE_DEVICES=$gpu_id poetry -C "$COFAI_ROOT" run python "$OFFLINE_DIR/test_seg.py" \
             --backbone "$BACKBONE" \
             --layer "$layer" \
             --ckpt_path "$ckpt" \

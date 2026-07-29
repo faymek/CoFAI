@@ -1,352 +1,86 @@
-#!/bin/bash
-# 全量 Soft-PQ 在线评测：精确对照 CSV "Ours" 配置
-# 基于 run_full_softpq_eval.sh，收拢到 examples/orfc_2446/dinov2/scripts/
-#
-# Usage:
-#   bash examples/orfc_2446/dinov2/scripts/run_online_eval_all.sh
-#   GPU_IDS=0,1,2,3 bash examples/orfc_2446/dinov2/scripts/run_online_eval_all.sh
-#   PYTHON=/path/to/python GPU_IDS=4,5,6,7 bash examples/orfc_2446/dinov2/scripts/run_online_eval_all.sh
-# Default PYTHON is CoFAI/.venv/bin/python (not system/conda python).
-set -uo pipefail
+#!/usr/bin/env bash
+# Run every published DINOv2 ORFC plan. The YAML plans are the only job list.
+
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ORFC2446_DIR="$(dirname "$SCRIPT_DIR")"
-COFAI_ROOT="$(dirname "$(dirname "$(dirname "$ORFC2446_DIR")")")"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
-PYTHON="${PYTHON:-$COFAI_ROOT/.venv/bin/python}"
-if [ ! -x "$PYTHON" ]; then
-    echo "ERROR: Python not found at $PYTHON"
-    echo "  Create the CoFAI venv (poetry install) or set PYTHON=/path/to/python"
-    exit 1
-fi
+PLAN_DIR="$COFAI_ROOT/examples/orfc_2446/plan/dinov2"
 GPU_IDS="${GPU_IDS:-0,1,2,3}"
-OUTPUT_BASE="${OUTPUT_BASE:-$COFAI_ROOT/eval_results}"
-
-export PROJECT_ROOT="$COFAI_ROOT"
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-
-# Drop unbuilt ORFC CompressAI source tree from PYTHONPATH (shadows pip compressai).
-if [ -n "${PYTHONPATH:-}" ]; then
-    CLEANED=""
-    IFS=':' read -ra _PP_PARTS <<< "$PYTHONPATH"
-    for _p in "${_PP_PARTS[@]}"; do
-        case "$_p" in
-            *ORFC/coding/CompressAI*|*coding/CompressAI*) continue ;;
-            *) CLEANED="${CLEANED:+${CLEANED}:}${_p}" ;;
-        esac
-    done
-    if [ -n "$CLEANED" ]; then
-        export PYTHONPATH="$CLEANED"
-    else
-        unset PYTHONPATH
-    fi
+OUTPUT_DIR="${OUTPUT_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov2}"
+DRY_RUN="${DRY_RUN:-0}"
+if [[ "$OUTPUT_DIR" != /* ]]; then
+    OUTPUT_DIR="$COFAI_ROOT/$OUTPUT_DIR"
 fi
 
-IFS=',' read -ra GPUS <<< "$GPU_IDS"
-NUM_GPUS=${#GPUS[@]}
-
-mkdir -p "$OUTPUT_BASE"
-
-codec_tag_from_ckpt() {
-    # Match run_eval_orfc_2446.resolve_result_subdir (include lmbda/tau/lr/ep).
-    local name tag
-    name=$(basename "$1" .npz)
-    name=${name%.pt}
-    if [[ "$name" =~ _K([0-9]+)_emb([0-9]+)_ ]]; then
-        tag="K${BASH_REMATCH[1]}e${BASH_REMATCH[2]}"
-        for key in lmbda tau lr ep; do
-            if [[ "$name" =~ _${key}([0-9.]+) ]]; then
-                tag="${tag}_${key}${BASH_REMATCH[1]}"
-            fi
-        done
-        echo "$tag"
-    else
-        echo "$name"
-    fi
-}
-
-dataset_from_task() {
-    case "$1" in
-        cls) echo "imagenet-sel500" ;;
-        seg) echo "voc2012-sel100" ;;
-    esac
-}
-
-slot_from_layer() {
-    case "$1" in
-        blk05) echo "slot06" ;;
-        blk10) echo "slot11" ;;
-        blk15) echo "slot16" ;;
-        blk20) echo "slot21" ;;
-        blk09) echo "slot10" ;;
-        blk19) echo "slot20" ;;
-        blk29) echo "slot30" ;;
-        *) echo "slot00" ;;
-    esac
-}
-
-result_subdir_from_job() {
-    local bb=$1 layer=$2 task=$3 ckpt=$4
-    local dataset bb_path slot codec_tag
-    dataset=$(dataset_from_task "$task")
-    if [ "$task" = "seg" ]; then
-        bb_path="dinov2-${bb}-slide"
-    else
-        bb_path="dinov2-${bb}"
-    fi
-    slot=$(slot_from_layer "$layer")
-    codec_tag=$(codec_tag_from_ckpt "$ckpt")
-    echo "${OUTPUT_BASE}/SoftPQ/${dataset}/${bb_path}/${slot}/${codec_tag}"
-}
-
-# ================================================================
-# Job definitions: "backbone layer task checkpoint_filename"
-# 精确对照4个CSV的Ours部分
-# ================================================================
-JOBS=()
-
-W_L="weights/orfc_2446/dinov2_vitl14_ori"
-W_G="weights/orfc_2446/dinov2_vitg14_ori"
-
-# ============== dinov2_vitl14 cls ==============
-# blk05
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K4_emb32_bt1024_ws_lmbda0.0_tau0.5_lr0.0005_ep300_n5000_s42.npz")
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 cls ${W_L}/blk05_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk10
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 cls ${W_L}/blk10_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk15
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 cls ${W_L}/blk15_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk20
-JOBS+=("vitl14 blk20 cls ${W_L}/blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 cls ${W_L}/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 cls ${W_L}/blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 cls ${W_L}/blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 cls ${W_L}/blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 cls ${W_L}/blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-
-# ============== dinov2_vitl14 seg ==============
-# blk05
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K4_emb32_bt1024_ws_lmbda0.0_tau0.5_lr0.0005_ep300_n5000_s42.npz")
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk05 seg ${W_L}/blk05_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk10
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk10 seg ${W_L}/blk10_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk15
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk15 seg ${W_L}/blk15_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk20
-JOBS+=("vitl14 blk20 seg ${W_L}/blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 seg ${W_L}/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 seg ${W_L}/blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 seg ${W_L}/blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 seg ${W_L}/blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitl14 blk20 seg ${W_L}/blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-
-# ============== dinov2_vitg14 cls ==============
-# blk09
-JOBS+=("vitg14 blk09 cls ${W_G}/blk09_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 cls ${W_G}/blk09_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 cls ${W_G}/blk09_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 cls ${W_G}/blk09_K64_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 cls ${W_G}/blk09_K256_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 cls ${W_G}/blk09_K64_emb16_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk19
-JOBS+=("vitg14 blk19 cls ${W_G}/blk19_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 cls ${W_G}/blk19_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 cls ${W_G}/blk19_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 cls ${W_G}/blk19_K64_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 cls ${W_G}/blk19_K256_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 cls ${W_G}/blk19_K64_emb16_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk29
-JOBS+=("vitg14 blk29 cls ${W_G}/blk29_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 cls ${W_G}/blk29_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 cls ${W_G}/blk29_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 cls ${W_G}/blk29_K64_emb32_bt1536_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 cls ${W_G}/blk29_K256_emb32_bt1536_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 cls ${W_G}/blk29_K64_emb16_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-
-# ============== dinov2_vitg14 seg ==============
-# blk09
-JOBS+=("vitg14 blk09 seg ${W_G}/blk09_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 seg ${W_G}/blk09_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 seg ${W_G}/blk09_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 seg ${W_G}/blk09_K64_emb32_bt1536_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 seg ${W_G}/blk09_K256_emb32_bt1536_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk09 seg ${W_G}/blk09_K64_emb16_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk19
-JOBS+=("vitg14 blk19 seg ${W_G}/blk19_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 seg ${W_G}/blk19_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 seg ${W_G}/blk19_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 seg ${W_G}/blk19_K64_emb32_bt1536_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 seg ${W_G}/blk19_K256_emb32_bt1536_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk19 seg ${W_G}/blk19_K64_emb16_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-# blk29
-JOBS+=("vitg14 blk29 seg ${W_G}/blk29_K4_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 seg ${W_G}/blk29_K8_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 seg ${W_G}/blk29_K16_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 seg ${W_G}/blk29_K64_emb32_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 seg ${W_G}/blk29_K256_emb32_bt1536_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz")
-JOBS+=("vitg14 blk29 seg ${W_G}/blk29_K64_emb16_bt1536_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz")
-
-TOTAL=${#JOBS[@]}
-
-# ================================================================
-# 检查所有 checkpoint 存在
-# ================================================================
-echo "============================================================"
-echo "  ORFC-2446 Online Evaluation (对照 CSV Ours 配置)"
-echo "  Total jobs: $TOTAL"
-echo "  Python: $PYTHON"
-echo "  GPUs: ${GPU_IDS} ($NUM_GPUS parallel)"
-echo "  Output: $OUTPUT_BASE"
-echo "  Started: $(date)"
-echo "============================================================"
-
-MISSING=0
-for ((i=0; i<TOTAL; i++)); do
-    read -r bb layer task ckpt <<< "${JOBS[$i]}"
-    if [ ! -f "$COFAI_ROOT/$ckpt" ]; then
-        echo "  MISSING: $ckpt"
-        MISSING=$((MISSING+1))
-    fi
-done
-if [ $MISSING -gt 0 ]; then
-    echo "ERROR: $MISSING checkpoints not found!"
+IFS=',' read -r -a GPUS <<< "$GPU_IDS"
+if (( ${#GPUS[@]} == 0 )) || [[ -z "${GPUS[0]}" ]]; then
+    echo "ERROR: GPU_IDS must contain at least one GPU id." >&2
     exit 1
 fi
-echo "  All $TOTAL checkpoints verified."
-echo ""
 
-get_backbone() {
-    local bb=$1
-    case "$bb" in
-        vitl14) echo "dinov2_vitl14" ;;
-        vitg14) echo "dinov2_vitg14" ;;
-    esac
-}
+mapfile -t PLANS < <(find "$PLAN_DIR" -maxdepth 1 -type f -name '*__ORFC__*.yaml' -printf '%f\n' | sort)
+if (( ${#PLANS[@]} == 0 )); then
+    echo "ERROR: No DINOv2 ORFC plans found in $PLAN_DIR." >&2
+    exit 1
+fi
 
-# ================================================================
-# GPU 并行调度
-# ================================================================
-declare -a GPU_PIDS
-for ((g=0; g<NUM_GPUS; g++)); do
-    GPU_PIDS[$g]=0
-done
+LOG_DIR="$OUTPUT_DIR/runner_logs"
+mkdir -p "$LOG_DIR"
 
-COMPLETED=0
-FAILED=0
+echo "============================================================"
+echo "  DINOv2 ORFC plan suite"
+echo "  Plans: ${#PLANS[@]}"
+echo "  GPUs: $GPU_IDS"
+echo "  Output: $OUTPUT_DIR"
+echo "  Dry run: $DRY_RUN"
+echo "============================================================"
 
-run_job() {
-    local gpu_idx=$1 bb=$2 layer=$3 task=$4 ckpt=$5
-    local gpu_id=${GPUS[$gpu_idx]}
-    local backbone=$(get_backbone "$bb")
-    local codec_tag result_subdir log_dir log
-    codec_tag=$(codec_tag_from_ckpt "$ckpt")
-    result_subdir=$(result_subdir_from_job "$bb" "$layer" "$task" "$ckpt")
-    log_dir="$(dirname "$result_subdir")/logs"
-    log="${log_dir}/${codec_tag}.log"
+run_plan() {
+    local gpu_id=$1
+    local plan_name=$2
+    local plan_path="$PLAN_DIR/$plan_name"
+    local log_file="$LOG_DIR/${plan_name%.yaml}.log"
 
-    mkdir -p "$log_dir"
-
-    CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON "$ORFC2446_DIR/run_eval_orfc_2446.py" \
-        --backbone "$backbone" \
-        --layer "$layer" \
-        --task "$task" \
-        --ckpt_path "$ckpt" \
-        --cuda \
-        --output_dir "$OUTPUT_BASE" \
-        > "$log" 2>&1
-}
-
-wait_for_gpu() {
-    # Must not run under $() — COMPLETED/FAILED must update the parent shell.
-    # Sets global _WAIT_GPU to a free GPU index.
-    while true; do
-        for ((g=0; g<NUM_GPUS; g++)); do
-            local pid=${GPU_PIDS[$g]}
-            if [ "$pid" -eq 0 ]; then
-                _WAIT_GPU=$g
-                return
-            fi
-            if ! kill -0 "$pid" 2>/dev/null; then
-                if wait "$pid" 2>/dev/null; then
-                    COMPLETED=$((COMPLETED+1))
-                else
-                    FAILED=$((FAILED+1))
-                fi
-                GPU_PIDS[$g]=0
-                _WAIT_GPU=$g
-                return
-            fi
-        done
-        sleep 2
-    done
-}
-
-for ((i=0; i<TOTAL; i++)); do
-    read -r bb layer task ckpt <<< "${JOBS[$i]}"
-    ckpt_short=$(basename "$ckpt" .npz | cut -c1-40)
-    wait_for_gpu
-    gpu_idx=$_WAIT_GPU
-    echo "[$(date '+%H:%M:%S')] [$((i+1))/$TOTAL] GPU${GPUS[$gpu_idx]}: ${bb}/${layer}/${task} ${ckpt_short}..."
-    run_job "$gpu_idx" "$bb" "$layer" "$task" "$ckpt" &
-    GPU_PIDS[$gpu_idx]=$!
-done
-
-for ((g=0; g<NUM_GPUS; g++)); do
-    local_pid=${GPU_PIDS[$g]}
-    if [ "$local_pid" -ne 0 ]; then
-        wait "$local_pid" 2>/dev/null && COMPLETED=$((COMPLETED+1)) || FAILED=$((FAILED+1))
+    echo "[gpu=$gpu_id] $plan_name"
+    if [[ "$DRY_RUN" == "1" ]]; then
+        echo "CUDA_VISIBLE_DEVICES=$gpu_id poetry -C $COFAI_ROOT run cofai-eval $plan_path args.multi_run=true args.cuda=true args.real=true args.output_dir=$OUTPUT_DIR" \
+            >"$log_file"
+        return
     fi
+    CUDA_VISIBLE_DEVICES="$gpu_id" poetry -C "$COFAI_ROOT" run cofai-eval \
+        "$plan_path" \
+        args.multi_run=true \
+        args.cuda=true \
+        args.real=true \
+        "args.output_dir=$OUTPUT_DIR" \
+        >"$log_file" 2>&1
+}
+
+completed=0
+failed=0
+for ((start=0; start<${#PLANS[@]}; start+=${#GPUS[@]})); do
+    pids=()
+    labels=()
+    for ((offset=0; offset<${#GPUS[@]} && start+offset<${#PLANS[@]}; offset++)); do
+        plan_name="${PLANS[start+offset]}"
+        run_plan "${GPUS[offset]}" "$plan_name" &
+        pids+=("$!")
+        labels+=("$plan_name")
+    done
+
+    for index in "${!pids[@]}"; do
+        if wait "${pids[index]}"; then
+            completed=$((completed + 1))
+        else
+            echo "FAIL: ${labels[index]} (see $LOG_DIR/${labels[index]%.yaml}.log)" >&2
+            failed=$((failed + 1))
+        fi
+    done
 done
 
-echo ""
-echo "============================================================"
-echo "  Online Evaluation Complete"
-echo "  Completed: $COMPLETED / $TOTAL"
-echo "  Failed: $FAILED"
-echo "  Results: $OUTPUT_BASE"
-echo "  Finished: $(date)"
-echo "============================================================"
-
-if [ $FAILED -gt 0 ]; then
-    echo ""
-    echo "  Check failed logs under: $OUTPUT_BASE/SoftPQ/**/logs/"
+echo "Completed plans: $completed / ${#PLANS[@]}"
+if (( failed > 0 )); then
+    exit 1
 fi

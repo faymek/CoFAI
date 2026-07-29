@@ -5,7 +5,6 @@ import os
 WEIGHTS_SUBDIR = {
     "dinov2_vitl14": "dinov2_vitl14_ori",
     "dinov2_vitg14": "dinov2_vitg14_ori",
-    "clip_vitl14": "clip_vitl14",
 }
 
 

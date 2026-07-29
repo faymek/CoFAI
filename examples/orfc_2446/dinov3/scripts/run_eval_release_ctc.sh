@@ -1,39 +1,83 @@
-#!/bin/bash
-# One-click online CTC eval for DINOv3 SoftPQ release weights.
-# Sweeps plan multi_run (8 rate points) x {semseg, depth} with multi-GPU parallel.
-#
-# Usage:
-#   bash examples/orfc_2446/dinov3/scripts/run_eval_release_ctc.sh
-#   GPUS=0,1,2,3 TASKS=both bash .../run_eval_release_ctc.sh
-#   GPUS=0 TASK=semseg bash .../run_eval_release_ctc.sh
+#!/usr/bin/env bash
+# Run the released DINOv3 ORFC-2446 plans through the standard CoFAI entrypoint.
 
 set -euo pipefail
-export PYTHONUNBUFFERED=1
-export MKL_NUM_THREADS=1
-export OMP_NUM_THREADS=1
-unset PYTHONPATH
 
-ROOT="${PROJECT_ROOT:-/data4/workspace/zlt/featcodec/CoFAI}"
-cd "$ROOT"
-export PROJECT_ROOT="$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
-GPUS="${GPUS:-0,1,2,3}"
-TASK="${TASK:-${TASKS:-both}}"
-OUTPUT_DIR="${OUTPUT_DIR:-eval_results}"
-PYTHON="${PYTHON:-poetry run python}"
+PLAN_DIR="$COFAI_ROOT/examples/orfc_2446/plan/dinov3"
+OUTPUT_DIR="${OUTPUT_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov3}"
+GPU_IDS="${GPU_IDS:-${GPUS:-0,1}}"
+TASK="${TASK:-both}"
+DRY_RUN="${DRY_RUN:-0}"
 
-echo "============================================================"
-echo "  DINOv3 SoftPQ release CTC eval (online Engine)"
-echo "  task=${TASK}  gpus=${GPUS}  output=${OUTPUT_DIR}"
-echo "  Started: $(date)"
-echo "============================================================"
+case "$TASK" in
+    semseg)
+        PATTERN="*__semseg.yaml"
+        ;;
+    depth)
+        PATTERN="*__depth.yaml"
+        ;;
+    both)
+        PATTERN="*.yaml"
+        ;;
+    *)
+        echo "ERROR: TASK must be semseg, depth, or both; got $TASK" >&2
+        exit 1
+        ;;
+esac
 
-$PYTHON examples/orfc_2446/dinov3/run_eval_orfc_2446_dinov3.py \
-  --task "$TASK" \
-  --multi-run \
-  --gpus "$GPUS" \
-  --cuda --real \
-  --output_dir "$OUTPUT_DIR"
+IFS=',' read -r -a GPUS <<< "$GPU_IDS"
+mapfile -t PLANS < <(find "$PLAN_DIR" -maxdepth 1 -type f -name "$PATTERN" | sort)
+if (( ${#PLANS[@]} == 0 )); then
+    echo "ERROR: No DINOv3 ORFC-2446 plans found in $PLAN_DIR." >&2
+    exit 1
+fi
 
-echo "Complete: $(date)"
-echo "Results under: ${OUTPUT_DIR}/SoftPQ/dinov3-vitl16-slot24/"
+LOG_DIR="$OUTPUT_DIR/runner_logs"
+mkdir -p "$LOG_DIR"
+
+run_plan() {
+    local gpu_id=$1
+    local plan_path=$2
+    local plan_name
+    plan_name="$(basename "$plan_path" .yaml)"
+    local log_file="$LOG_DIR/$plan_name.log"
+
+    echo "[gpu=$gpu_id] $plan_name"
+    if [[ "$DRY_RUN" == "1" ]]; then
+        echo "CUDA_VISIBLE_DEVICES=$gpu_id poetry -C $COFAI_ROOT run cofai-eval $plan_path args.multi_run=true args.cuda=true args.real=true args.output_dir=$OUTPUT_DIR" \
+            >"$log_file"
+        return
+    fi
+    CUDA_VISIBLE_DEVICES="$gpu_id" poetry -C "$COFAI_ROOT" run cofai-eval \
+        "$plan_path" \
+        args.multi_run=true \
+        args.cuda=true \
+        args.real=true \
+        "args.output_dir=$OUTPUT_DIR" \
+        >"$log_file" 2>&1
+}
+
+pids=()
+labels=()
+for index in "${!PLANS[@]}"; do
+    gpu="${GPUS[index % ${#GPUS[@]}]}"
+    run_plan "$gpu" "${PLANS[index]}" &
+    pids+=("$!")
+    labels+=("${PLANS[index]}")
+done
+
+failed=0
+for index in "${!pids[@]}"; do
+    if ! wait "${pids[index]}"; then
+        echo "FAIL: ${labels[index]}" >&2
+        failed=$((failed + 1))
+    fi
+done
+
+echo "Completed plans: $((${#PLANS[@]} - failed)) / ${#PLANS[@]}"
+if (( failed > 0 )); then
+    exit 1
+fi

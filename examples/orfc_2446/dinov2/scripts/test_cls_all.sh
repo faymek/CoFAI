@@ -1,17 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Run classification evaluation for all Soft-PQ configurations.
 # Loads trained codec checkpoints and evaluates accuracy + rate.
 # Uses multiple GPUs in parallel.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ORFC2446_DIR="$(dirname "$SCRIPT_DIR")"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+ORFC2446_DIR="$COFAI_ROOT/examples/orfc_2446/dinov2"
 OFFLINE_DIR="$ORFC2446_DIR/offline"
-COFAI_ROOT="$(dirname "$(dirname "$(dirname "$ORFC2446_DIR")")")"
-PYTHON="${PYTHON:-python}"
 
 WEIGHTS_DIR="${WEIGHTS_DIR:-$COFAI_ROOT/weights/orfc_2446}"
-LOG_DIR="$ORFC2446_DIR/logs/test_cls"
+LOG_DIR="${LOG_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov2/offline_cls}"
 mkdir -p "$LOG_DIR"
 
 NUM_GPUS="${NUM_GPUS:-4}"
@@ -79,7 +79,7 @@ run_job() {
     local tag=$(basename "$ckpt" .npz)
     local log="$LOG_DIR/${tag}.log"
 
-    CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON "$OFFLINE_DIR/test_cls.py" \
+    CUDA_VISIBLE_DEVICES=$gpu_id poetry -C "$COFAI_ROOT" run python "$OFFLINE_DIR/test_cls.py" \
         --backbone "$backbone" --layer "$layer" \
         --ckpt_path "$ckpt" \
         > "$log" 2>&1

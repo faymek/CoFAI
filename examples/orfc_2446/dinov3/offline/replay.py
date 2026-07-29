@@ -14,8 +14,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-_COFAI_ROOT = Path(__file__).resolve().parents[3]
-_EXAMPLE_DIR = Path(__file__).resolve().parent
+_COFAI_ROOT = Path(__file__).resolve().parents[4]
+_EXAMPLE_DIR = Path(__file__).resolve().parents[1]
 for _p in (_COFAI_ROOT, _EXAMPLE_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -24,7 +24,6 @@ from lib.config_utils import load_config, resolve_project_root, task_feat_dir
 from lib.orfc_codec import (
     NORM_MODE_CHOICES,
     encode_decode_single,
-    norm_sideinfo_bits,
     resolve_norm_settings,
 )
 from lib.rate_eval import evaluate_rate
@@ -119,16 +118,16 @@ def cmd_replay(args) -> None:
         ckpt_path = Path(args.ckpt_path)
         if ckpt_path.suffix != ".npz":
             _fail(f"Eval requires a single SoftPQ .npz (got {ckpt_path})")
-        from cofai.latent_codecs.soft_pq import SoftPQFeatureCodec
-        from cofai.entropy_models.soft_pq_export import load_softpq_npz
+        from cofai.latent_codecs import OrthoRotationFeatureCodec
+        from examples.orfc_2446.offline.artifacts import load_softpq_npz
 
         payload = load_softpq_npz(args.ckpt_path)
         ckpt_meta = {
             "norm_mode": payload["norm_mode"],
             "n_prefix": payload["n_prefix"],
         }
-        codec = SoftPQFeatureCodec(
-            codec_path=args.ckpt_path,
+        codec = OrthoRotationFeatureCodec(
+            orfc_weights_path=args.ckpt_path,
             norm_mode=payload["norm_mode"],
             n_prefix=payload["n_prefix"],
         ).to(device)
@@ -137,18 +136,16 @@ def cmd_replay(args) -> None:
     norm_mode, n_prefix, norm_src = resolve_norm_settings(
         norm_mode=args.norm_mode,
         n_prefix=args.n_prefix,
-        ckpt_path=args.ckpt_path,
-        ckpt_meta=ckpt_meta,
+        artifact_meta=ckpt_meta,
         default_n_prefix=cfg.get("n_prefix", 5),
         fallback_norm=cfg.get("train_defaults", {}).get("norm_mode", "split_cls_patch"),
     )
-    sideinfo_bpi = norm_sideinfo_bits(norm_mode, n_prefix, 0)
-    print(
-        f"[replay] norm_mode={norm_mode}  n_prefix={n_prefix}  "
-        f"(source={norm_src})"
-    )
+    if codec is not None:
+        codec.norm_mode = norm_mode
+        codec.n_prefix = n_prefix
+    print(f"[replay] norm_mode={norm_mode}  n_prefix={n_prefix}  " f"(source={norm_src})")
 
-    results_dir = Path(cfg["paths"]["results_dir"])
+    results_dir = Path(args.results_dir or cfg["paths"]["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
 
     stems = subset
@@ -175,10 +172,7 @@ def cmd_replay(args) -> None:
         meta = dict(np.load(meta_path, allow_pickle=True))
 
         if mode == "orfc":
-            recon = encode_decode_single(
-                tokens, codec, norm_mode, device,
-                n_prefix=n_prefix,
-            )
+            recon = encode_decode_single(tokens, codec, device)
             total_mse += float(np.mean((tokens - recon) ** 2))
             n_mse += 1
             rate_features.append(tokens)
@@ -209,9 +203,7 @@ def cmd_replay(args) -> None:
     metrics = meter.compute()
     use_transform = True
     if mode == "orfc" and args.ckpt_path:
-        use_transform = ckpt_meta.get(
-            "use_transform", ckpt_meta.get("has_transform", True)
-        )
+        use_transform = ckpt_meta.get("use_transform", ckpt_meta.get("has_transform", True))
     out = {
         "task": task,
         "mode": mode,
@@ -230,13 +222,8 @@ def cmd_replay(args) -> None:
         rate = evaluate_rate(
             rate_features,
             codec,
-            ckpt_path=args.ckpt_path,
-            norm_mode=norm_mode,
-            n_prefix=n_prefix,
             embed_dim=cfg["embed_dim"],
             device=device,
-            sideinfo_bpi=sideinfo_bpi,
-            require_sidecar=getattr(args, "require_sidecar", False),
         )
         out["rate"] = rate
         rans = rate.get("rans_bpt")
@@ -271,16 +258,16 @@ def cmd_rate(args) -> None:
     ckpt_path = Path(args.ckpt_path)
     if ckpt_path.suffix != ".npz":
         _fail(f"Eval requires a single SoftPQ .npz (got {ckpt_path})")
-    from cofai.latent_codecs.soft_pq import SoftPQFeatureCodec
-    from cofai.entropy_models.soft_pq_export import load_softpq_npz
+    from cofai.latent_codecs import OrthoRotationFeatureCodec
+    from examples.orfc_2446.offline.artifacts import load_softpq_npz
 
     payload = load_softpq_npz(args.ckpt_path)
     ckpt_meta = {
         "norm_mode": payload["norm_mode"],
         "n_prefix": payload["n_prefix"],
     }
-    codec = SoftPQFeatureCodec(
-        codec_path=args.ckpt_path,
+    codec = OrthoRotationFeatureCodec(
+        orfc_weights_path=args.ckpt_path,
         norm_mode=payload["norm_mode"],
         n_prefix=payload["n_prefix"],
     ).to(device)
@@ -288,15 +275,13 @@ def cmd_rate(args) -> None:
     norm_mode, n_prefix, norm_src = resolve_norm_settings(
         norm_mode=args.norm_mode,
         n_prefix=args.n_prefix,
-        ckpt_path=args.ckpt_path,
-        ckpt_meta=ckpt_meta,
+        artifact_meta=ckpt_meta,
         default_n_prefix=cfg.get("n_prefix", 5),
         fallback_norm=cfg.get("train_defaults", {}).get("norm_mode", "split_cls_patch"),
     )
-    sideinfo_bpi = norm_sideinfo_bits(norm_mode, n_prefix, 0)
-    print(
-        f"[rate] norm_mode={norm_mode}  n_prefix={n_prefix}  (source={norm_src})"
-    )
+    codec.norm_mode = norm_mode
+    codec.n_prefix = n_prefix
+    print(f"[rate] norm_mode={norm_mode}  n_prefix={n_prefix}  (source={norm_src})")
 
     stems = subset or {p.stem for p in token_dir.glob("*.npy")}
     features = [np.load(token_dir / f"{s}.npy") for s in sorted(stems)]
@@ -304,16 +289,11 @@ def cmd_rate(args) -> None:
     rate = evaluate_rate(
         features,
         codec,
-        ckpt_path=args.ckpt_path,
-        norm_mode=norm_mode,
-        n_prefix=n_prefix,
         embed_dim=cfg["embed_dim"],
         device=device,
-        sideinfo_bpi=sideinfo_bpi,
-        require_sidecar=getattr(args, "require_sidecar", False),
     )
 
-    results_dir = Path(cfg["paths"]["results_dir"])
+    results_dir = Path(args.results_dir or cfg["paths"]["results_dir"])
     results_dir.mkdir(parents=True, exist_ok=True)
     tag = f"{task}_rate_{Path(args.ckpt_path).stem}"
     out = {
@@ -347,27 +327,23 @@ def main():
     rp.add_argument("--mode", choices=["bypass", "orfc"], default="orfc")
     rp.add_argument("--ckpt_path", type=str, default=None)
     rp.add_argument("--subset", type=str, default=None)
-    rp.add_argument("--norm_mode", choices=NORM_MODE_CHOICES, default=None,
-                    help="Feature norm (default: auto from ckpt meta/filename)")
+    rp.add_argument("--results_dir", type=str, default=None)
+    rp.add_argument(
+        "--norm_mode", choices=NORM_MODE_CHOICES, default=None, help="Override normalization stored in the artifact"
+    )
     rp.add_argument("--n_prefix", type=int, default=0)
     rp.add_argument("--gpu", type=int, default=0)
-    rp.add_argument(
-        "--require_sidecar", action="store_true",
-        help="Deprecated no-op: PMF lives in the eval .npz itself",
-    )
 
     rt = sub.add_parser("rate")
     rt.add_argument("--task", choices=["semseg", "depth"], required=True)
     rt.add_argument("--ckpt_path", type=str, required=True)
     rt.add_argument("--subset", type=str, default=None)
-    rt.add_argument("--norm_mode", choices=NORM_MODE_CHOICES, default=None,
-                    help="Feature norm (default: auto from ckpt meta/filename)")
+    rt.add_argument("--results_dir", type=str, default=None)
+    rt.add_argument(
+        "--norm_mode", choices=NORM_MODE_CHOICES, default=None, help="Override normalization stored in the artifact"
+    )
     rt.add_argument("--n_prefix", type=int, default=0)
     rt.add_argument("--gpu", type=int, default=0)
-    rt.add_argument(
-        "--require_sidecar", action="store_true",
-        help="Deprecated no-op: PMF lives in the eval .npz itself",
-    )
 
     args = ap.parse_args()
     os.environ.setdefault("PROJECT_ROOT", str(resolve_project_root()))
