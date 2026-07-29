@@ -1,24 +1,52 @@
-"""Feature-codec adapter for the checkpoint-compatible GPS ReID model."""
+"""Checkpoint-compatible GPS TransReID backbone integration."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 
 from cofai.index_codecs import AdaptiveBitmapIndexCodec
-from examples.gps.reid.head import GPSReIDFeatures
 
-from .utils import shuffle_unit
-
-SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
+_SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
 
 
-class GPSReIDBackbone(nn.Module):
-    """Expose the legacy GPS model through a DINO-like encode/decode boundary.
+@dataclass(frozen=True)
+class GPSTransReIDFeatures:
+    """Task features emitted by the GPS TransReID decoder."""
 
-    GPS grouping remains inside the Transformer encoder because it is interleaved
-    with several blocks. The final selection map is a transmitted rate-only stream:
-    the current compact-token ReID decoder does not consume it.
+    global_feature: torch.Tensor
+    bottleneck_global_feature: torch.Tensor
+    local_token_features: tuple[torch.Tensor, ...]
+
+
+def shuffle_unit(features, shift, group, begin=1):
+    """Apply the TransReID JPM shift-and-shuffle operation."""
+    batch_size = features.size(0)
+    dim = features.size(-1)
+    shifted = torch.cat(
+        [
+            features[:, begin - 1 + shift :],
+            features[:, begin : begin - 1 + shift],
+        ],
+        dim=1,
+    )
+    if shifted.size(1) == 0:
+        raise RuntimeError("shuffle_unit received no patch tokens")
+    while shifted.size(1) % group != 0:
+        shifted = torch.cat([shifted, shifted[:, -1:, :]], dim=1)
+    shuffled = shifted.view(batch_size, group, -1, dim)
+    shuffled = torch.transpose(shuffled, 1, 2).contiguous()
+    return shuffled.view(batch_size, -1, dim)
+
+
+class GPSTransReIDBackbone(nn.Module):
+    """Adapt a released GPS TransReID model to the CoFAI backbone boundary.
+
+    GPS grouping remains inside the specialized multi-view TransReID encoder
+    because it is interleaved with several Transformer blocks. The decoder
+    preserves the checkpoint's global branch and four JPM local branches.
     """
 
     def __init__(self, model: nn.Module):
@@ -100,7 +128,10 @@ class GPSReIDBackbone(nn.Module):
         if is_pruned:
             rows = []
             for values in indices.detach().cpu().tolist():
-                payload = SELECTION_MAP_CODEC.encode(values, token_count).to_bytes()
+                payload = _SELECTION_MAP_CODEC.encode(
+                    values,
+                    token_count,
+                ).to_bytes()
                 rows.append([payload])
             strings["selection_map"] = rows
 
@@ -124,7 +155,8 @@ class GPSReIDBackbone(nn.Module):
         extra_token = bool(pstate.get("extra_token", False))
         if extra_token:
             global_feature = global_tokens[:, : self.cls_token_num].reshape(
-                batch_size, -1
+                batch_size,
+                -1,
             )
             cls_token_num = self.cls_token_num
             bottleneck_global_feature = global_tokens[:, 0]
@@ -154,7 +186,7 @@ class GPSReIDBackbone(nn.Module):
             )
 
         return {
-            "reid": GPSReIDFeatures(
+            "reid": GPSTransReIDFeatures(
                 global_feature=global_feature,
                 bottleneck_global_feature=bottleneck_global_feature,
                 local_token_features=tuple(local_token_features),

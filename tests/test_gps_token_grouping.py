@@ -4,15 +4,15 @@ import pytest
 import torch
 from types import SimpleNamespace
 
+from cofai.backbone import GPSTransReIDBackbone
+from cofai.heads import GPSTransReIDHead
 from cofai.index_codecs import (
     AdaptiveBitmapIndexCodec,
     EncodedSelectionMap,
 )
 from cofai.token_grouping import GraphTokenGrouper
 from examples.gps.config import load_config
-from examples.gps.reid.backbone import GPSReIDBackbone
 from examples.gps.reid.evaluator import _output_order
-from examples.gps.reid.head import GPSReIDHead
 from examples.gps.run_eval_token_grouping import summarize_run
 from examples.gps.token_grouping_eval.model_probe import ProbeRecord
 
@@ -158,8 +158,8 @@ def test_gps_backbone_emits_flat_map_side_stream_and_keeps_cls():
             self.neck_feat = "before"
 
     legacy_model = DummyModel()
-    backbone = GPSReIDBackbone(legacy_model)
-    head = GPSReIDHead(legacy_model).eval()
+    backbone = GPSTransReIDBackbone(legacy_model)
+    head = GPSTransReIDHead(legacy_model).eval()
     encoded = backbone.encode(
         torch.zeros(2, 3, 4, 4),
         label=torch.arange(2),

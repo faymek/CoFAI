@@ -1,24 +1,15 @@
-"""Task head for checkpoint-compatible GPS vehicle retrieval."""
+"""Embedding head for the released GPS TransReID checkpoint."""
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 
-
-@dataclass(frozen=True)
-class GPSReIDFeatures:
-    """Backbone features consumed by the GPS ReID embedding head."""
-
-    global_feature: torch.Tensor
-    bottleneck_global_feature: torch.Tensor
-    local_token_features: tuple[torch.Tensor, ...]
+from cofai.backbone.gps_transreid import GPSTransReIDFeatures
 
 
-class GPSReIDHead(nn.Module):
-    """Apply the released GPS bottlenecks and embedding concatenation."""
+class GPSTransReIDHead(nn.Module):
+    """Apply the released TransReID bottlenecks and embedding concatenation."""
 
     def __init__(self, model: nn.Module):
         super().__init__()
@@ -34,15 +25,18 @@ class GPSReIDHead(nn.Module):
             ]
         )
 
-    def forward(self, features: GPSReIDFeatures) -> torch.Tensor:
-        if not isinstance(features, GPSReIDFeatures):
+    def forward(self, features: GPSTransReIDFeatures) -> torch.Tensor:
+        if not isinstance(features, GPSTransReIDFeatures):
             raise TypeError(
-                "GPSReIDHead expects GPSReIDFeatures from GPSReIDBackbone.decode"
+                "GPSTransReIDHead expects GPSTransReIDFeatures from "
+                "GPSTransReIDBackbone.decode"
             )
         if self.training:
-            raise RuntimeError("GPSReIDHead is an evaluation-only embedding head")
+            raise RuntimeError("GPSTransReIDHead is an evaluation-only embedding head")
         if len(features.local_token_features) != len(self.local_bottlenecks):
-            raise ValueError("GPS ReID backbone and head must expose four local branches")
+            raise ValueError(
+                "GPS TransReID backbone and head must expose four local branches"
+            )
 
         global_bn = self.bottleneck(features.bottleneck_global_feature)
         local_bn = [

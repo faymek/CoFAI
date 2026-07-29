@@ -14,11 +14,11 @@ GPS 的公共实现位于 `cofai/token_grouping/` 和
 `CommonFeatureCodecModel`：
 
 ```text
-GPSReIDBackbone.encode（内部执行多层 GPS）
+GPSTransReIDBackbone.encode（内部执行多层 GPS）
 → RawDtypeCodec（当前 dtype=float16）
 → post_process=None（预留变量，当前直接透传）
-→ GPSReIDBackbone.decode（尾部 Transformer）
-→ GPSReIDHead（原 bottleneck 与 embedding 拼接）
+→ GPSTransReIDBackbone.decode（TransReID 全局与 JPM 局部分支）
+→ GPSTransReIDHead（原 bottleneck 与 embedding 拼接）
 ```
 
 GPS 必须在多个 Transformer 层内部读取 attention，因此它属于 backbone
@@ -91,6 +91,10 @@ CoFAI/
 
 ```text
 cofai/
+├── backbone/
+│   └── gps_transreid.py                # GPS TransReID backbone
+├── heads/
+│   └── gps_transreid.py                # GPS TransReID embedding head
 ├── models/
 │   └── common.py                       # 探索性 CommonFeatureCodecModel
 ├── latent_codecs/
@@ -108,8 +112,7 @@ examples/gps/
 │   ├── token_grouping.yml             # M2460 码率与 map 一致性配置
 ├── reid/
 │   ├── backbone/
-│   │   ├── codec.py                   # DINO 风格 encode/decode 适配
-│   │   └── vit_pytorch.py             # GPS Transformer 主干与多视角 Token Grouping
+│   │   └── vit_pytorch.py             # 原始 GPS TransReID 模型实现
 │   ├── datasets/
 │   │   ├── veri.py                    # VeRi-776 数据集读取
 │   │   ├── muri.py                    # MuRI 数据集读取

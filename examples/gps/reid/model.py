@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import copy
 
+from cofai.backbone.gps_transreid import shuffle_unit
+
 from .backbone.vit_pytorch import vit_base_patch16_224_TransReID_seq
-from .backbone.utils import shuffle_unit
 
 
 def weights_init_kaiming(m):

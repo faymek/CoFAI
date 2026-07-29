@@ -7,8 +7,8 @@ from dataclasses import dataclass
 
 import torch
 
+from cofai.backbone import GPSTransReIDBackbone
 from cofai.models import CommonFeatureCodecModel
-from examples.gps.reid.backbone import GPSReIDBackbone
 
 
 @dataclass
@@ -85,8 +85,8 @@ class TokenGroupingProbe:
 def install_token_grouping_probe(model) -> TokenGroupingProbe:
     """Install and return a collector on a GPS ReID model."""
     backbone = model.backbone if isinstance(model, CommonFeatureCodecModel) else model
-    if not isinstance(backbone, GPSReIDBackbone):
-        raise TypeError("token grouping probes require GPSReIDBackbone")
+    if not isinstance(backbone, GPSTransReIDBackbone):
+        raise TypeError("token grouping probes require GPSTransReIDBackbone")
     probe = TokenGroupingProbe(
         backbone.token_grouper,
         backbone.patches_per_view,

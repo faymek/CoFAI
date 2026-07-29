@@ -1,5 +1,1 @@
-"""GPS transformer backbone."""
-
-from .codec import GPSReIDBackbone
-
-__all__ = ["GPSReIDBackbone"]
+"""Released GPS TransReID model implementation."""
