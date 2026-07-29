@@ -1,210 +1,277 @@
-"""ORFC (Orthogonal Rotation Feature Codec) as a latent codec.
+"""Orthogonal-rotation product quantization for DINO feature tokens.
 
-This adapts the ORFC quantizer used by the bespoke ``Dinov2ClsORFC`` /
-``Dinov2SlideSegORFC`` models to the latent-codec API expected by
-:class:`~cofai.models.base.DinoFeatureCodecModel` /
-:class:`~cofai.models.base.DinoSlideFeatureCodecModel`:
-
-* ``forward(h, token_res, qp) -> {"h_hat", "bits"}``
-* ``compress(h, token_res, qp) -> {"strings", "pstate"}``
-* ``decompress(strings, pstate) -> {"h_hat"}``
-
-operating on encoder token tensors of shape ``(B, N, C)`` (cls / register
-prefix included -- ORFC compresses the whole token sequence, mirroring the
-bespoke models which call ``_orfc_encode_decode`` on the full ``h``).
-
-The quantization pipeline is identical to ``_ORFCMixin`` (per-image normalize ->
-rotate by ``R`` -> product-quantize against ``codebooks`` -> inverse rotate ->
-denormalize). When the loaded ``.npz`` provides a ``pmf``, labels are entropy
-coded with rANS for real compression; otherwise the fixed-rate
-``num_groups * log2(K)`` bits/token is reported.
+The runtime codec consumes a released ``.npz`` artifact containing ``R``,
+``codebooks`` and ``pmf``. Training and artifact export live with the proposal
+under ``examples/orfc_2446/offline``; this module only implements the stable
+LatentCodec contract used by the evaluation engine.
 """
 
-import math
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-from cofai.entropy_models.orfc_model import (
-    batch_normalize_gpu,
-    batch_inv_normalize_gpu,
-    batched_assign,
+from cofai.entropy_models.static_categorical import StaticCategoricalEntropyModel
+from cofai.ops.orfc import batched_assign
+
+from .orfc_normalization import (
+    ORFC_NORM_MODES,
+    denormalize_orfc_features,
+    normalize_orfc_features,
 )
+
+_STATS_DTYPE = np.dtype("<f4")
+
+
+def _scalar(data: Any, key: str, default: Any) -> Any:
+    if key not in data:
+        return default
+    value = data[key]
+    return value.item() if hasattr(value, "item") else value
+
+
+def load_orfc_artifact(path: str | Path) -> dict[str, Any]:
+    """Load and validate one released ORFC ``.npz`` artifact."""
+    artifact_path = Path(path)
+    if artifact_path.suffix.lower() != ".npz":
+        raise ValueError(f"ORFC requires a .npz artifact, got: {artifact_path}")
+    if not artifact_path.is_file():
+        raise FileNotFoundError(f"ORFC artifact not found: {artifact_path}")
+
+    with np.load(artifact_path, allow_pickle=False) as data:
+        required = {"R", "codebooks", "pmf"}
+        missing = sorted(required.difference(data.files))
+        if missing:
+            raise KeyError(
+                f"ORFC artifact is missing required arrays {missing}: {artifact_path}"
+            )
+
+        rotation = np.asarray(data["R"], dtype=np.float32)
+        codebooks = np.asarray(data["codebooks"], dtype=np.float32)
+        pmf = np.asarray(data["pmf"], dtype=np.float32)
+        norm_mode = str(_scalar(data, "norm_mode", "per_image"))
+        n_prefix = int(_scalar(data, "n_prefix", 0))
+
+    if codebooks.ndim != 3:
+        raise ValueError(
+            f"ORFC codebooks must have shape (groups, entries, dim), got {codebooks.shape}"
+        )
+    groups, entries, embedding_dim = codebooks.shape
+    feature_dim = groups * embedding_dim
+    if rotation.shape != (feature_dim, feature_dim):
+        raise ValueError(
+            f"ORFC rotation has shape {rotation.shape}; expected {(feature_dim, feature_dim)}"
+        )
+    if pmf.shape != (groups, entries):
+        raise ValueError(
+            f"ORFC PMF has shape {pmf.shape}; expected {(groups, entries)}"
+        )
+    if norm_mode not in ORFC_NORM_MODES:
+        raise ValueError(f"Unsupported ORFC normalization mode: {norm_mode!r}")
+    if n_prefix < 0:
+        raise ValueError(f"ORFC n_prefix must be non-negative, got {n_prefix}")
+    if not all(np.all(np.isfinite(array)) for array in (rotation, codebooks, pmf)):
+        raise ValueError(f"ORFC artifact contains non-finite values: {artifact_path}")
+    if np.any(pmf < 0) or np.any(pmf.sum(axis=1) <= 0):
+        raise ValueError(
+            f"ORFC PMF must be non-negative with positive group mass: {artifact_path}"
+        )
+
+    pmf = pmf / pmf.sum(axis=1, keepdims=True)
+    return {
+        "R": rotation,
+        "codebooks": codebooks,
+        "pmf": pmf.astype(np.float32),
+        "norm_mode": norm_mode,
+        "n_prefix": n_prefix,
+        "groups": int(groups),
+        "entries": int(entries),
+        "embedding_dim": int(embedding_dim),
+        "feature_dim": int(feature_dim),
+        "path": str(artifact_path),
+    }
 
 
 class OrthoRotationFeatureCodec(nn.Module):
-    """ORFC (Orthogonal Rotation Feature Codec) .
+    """Fixed ORFC/Soft-PQ artifact exposed through the LatentCodec API.
 
-    ORFC quantizer wrapped as a feature latent codec.
-
-    Args:
-        orfc_weights_path (str): Path to the ``.npz`` file with ``R`` (D, D),
-            ``codebooks`` (G, K, d) and optional ``pmf`` (G, K).
-        K (int): Codebook size per group.
-        embedding_dim (int): Sub-vector dimension ``d`` (``G = D // d``).
-        **kwargs: Ignored (accepted for config convenience).
+    ``K`` and ``embedding_dim`` are optional artifact assertions retained by
+    existing ORFC plans. New plans only need ``orfc_weights_path``.
     """
 
     def __init__(
         self,
-        orfc_weights_path: str = "",
-        K: int = 256,
-        embedding_dim: int = 32,
-        **kwargs,
+        orfc_weights_path: str,
+        K: int | None = None,
+        embedding_dim: int | None = None,
+        norm_mode: str | None = None,
+        n_prefix: int | None = None,
     ):
         super().__init__()
-        self.K = int(K)
-        self.embedding_dim = int(embedding_dim)
+        artifact = load_orfc_artifact(orfc_weights_path)
 
-        data = np.load(orfc_weights_path, allow_pickle=True)
-        R = data["R"]  # (D, D)
-        codebooks = data["codebooks"]  # (G, K, d)
+        self.orfc_weights_path = str(orfc_weights_path)
+        self.K = artifact["entries"]
+        self.embedding_dim = artifact["embedding_dim"]
+        self.num_groups = artifact["groups"]
+        self.G = self.num_groups
+        self.feat_dim = artifact["feature_dim"]
+        self.norm_mode = str(norm_mode or artifact["norm_mode"])
+        self.n_prefix = artifact["n_prefix"] if n_prefix is None else int(n_prefix)
 
-        D = R.shape[0]
-        self.feat_dim = int(D)
-        self.num_groups = int(D) // self.embedding_dim
-
-        self.register_buffer("R", torch.from_numpy(R).float())
-        self.register_buffer("codebooks", torch.from_numpy(codebooks).float())
-        if "pmf" in data:
-            self.register_buffer(
-                "pmf", torch.from_numpy(data["pmf"].astype(np.float32))
+        if K is not None and int(K) != self.K:
+            raise ValueError(f"Configured K={K} does not match artifact K={self.K}")
+        if embedding_dim is not None and int(embedding_dim) != self.embedding_dim:
+            raise ValueError(
+                "Configured embedding_dim="
+                f"{embedding_dim} does not match artifact embedding_dim={self.embedding_dim}"
             )
-        else:
-            self.pmf = None
+        if self.norm_mode not in ORFC_NORM_MODES:
+            raise ValueError(f"Unsupported ORFC normalization mode: {self.norm_mode!r}")
+        if self.n_prefix < 0:
+            raise ValueError(f"ORFC n_prefix must be non-negative, got {self.n_prefix}")
 
-    # ------------------------------------------------------------------ #
-    # Core ORFC quantization
-    # ------------------------------------------------------------------ #
-    def _assign_labels(self, tokens):
-        """(B, N, D) tokens -> (per-image mu/std, PQ labels (G, B*N))."""
-        B, N, D = tokens.shape
-        Y, mu, std = batch_normalize_gpu(tokens, mode="per_image")
-        flat = Y.reshape(B * N, D)
-        Z = flat @ self.R
-        z_3d = Z.reshape(B * N, self.num_groups, self.embedding_dim)
-        z_3d = z_3d.permute(1, 0, 2).contiguous()  # (G, B*N, d)
-        _, labels = batched_assign(z_3d, self.codebooks, device=tokens.device)
-        return mu, std, labels
+        self.register_buffer("R", torch.from_numpy(artifact["R"]))
+        self.register_buffer("codebooks", torch.from_numpy(artifact["codebooks"]))
+        self.entropy_model = StaticCategoricalEntropyModel(
+            torch.from_numpy(artifact["pmf"])
+        )
 
-    def _tokens_from_labels(self, labels, mu, std, B, N):
-        """PQ labels + normalization stats -> reconstructed (B, N, D) tokens."""
-        D = self.feat_dim
-        G = self.num_groups
-        d = self.embedding_dim
-        labels_exp = labels.unsqueeze(-1).expand(G, B * N, d)
-        z_hat_3d = torch.gather(self.codebooks, 1, labels_exp)  # (G, B*N, d)
-        flat_hat = z_hat_3d.permute(1, 0, 2).reshape(B * N, D)
-        Y_hat = (flat_hat @ self.R.T).reshape(B, N, D)
-        return batch_inv_normalize_gpu(Y_hat, mu, std)
-
-    def _theoretical_bits(self, n_tokens: int) -> float:
-        return float(n_tokens * self.num_groups * math.log2(self.K))
-
-    def _actual_bits(self, labels) -> float:
-        byte_strings = self._rans_encode(labels)
-        if byte_strings is not None:
-            return float(sum(len(s) for s in byte_strings) * 8.0)
-        return self._theoretical_bits(labels.shape[1])
-
-    # ------------------------------------------------------------------ #
-    # rANS entropy coding (optional, requires stored pmf + compressai)
-    # ------------------------------------------------------------------ #
-    def _group_cdf(self, g: int):
-        pmf_g = self.pmf[g].cpu().numpy()
-        pmf_int = (pmf_g * (1 << 16)).astype(np.int32)
-        pmf_int = np.maximum(pmf_int, 1)
-        pmf_int[-1] = (1 << 16) - 1 - pmf_int[:-1].sum()
-        cdf = np.zeros(self.K + 2, dtype=np.int32)
-        cdf[1 : self.K + 1] = np.cumsum(pmf_int)
-        cdf[self.K + 1] = 1 << 16
-        return cdf.tolist()
-
-    def _rans_encode(self, labels):
-        if self.pmf is None:
-            return None
-        try:
-            from compressai.ans import RansEncoder
-        except ImportError:
-            return None
-
-        G, N = labels.shape
-        byte_strings = []
-        for g in range(G):
-            cdf_list = self._group_cdf(g)
-            indices = labels[g].cpu().numpy().astype(np.int32)
-            encoder = RansEncoder()
-            bs = encoder.encode_with_indexes(
-                indices.tolist(), [0] * N, [cdf_list], [self.K + 2], [0]
+    def _assign_labels(
+        self,
+        tokens: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch_size, n_tokens, feature_dim = tokens.shape
+        if feature_dim != self.feat_dim:
+            raise ValueError(
+                f"ORFC expected feature dimension {self.feat_dim}, got {feature_dim}"
             )
-            byte_strings.append(bs)
-        return byte_strings
 
-    def _rans_decode(self, byte_strings, n_tokens: int):
-        from compressai.ans import RansDecoder
+        normalized, mean, std = normalize_orfc_features(
+            tokens,
+            mode=self.norm_mode,
+            n_prefix=self.n_prefix,
+        )
+        rotated = normalized.reshape(batch_size * n_tokens, feature_dim) @ self.R
+        sub_vectors = rotated.reshape(
+            batch_size * n_tokens,
+            self.num_groups,
+            self.embedding_dim,
+        )
+        sub_vectors = sub_vectors.permute(1, 0, 2).contiguous()
+        _, labels = batched_assign(sub_vectors, self.codebooks, device=tokens.device)
+        return mean, std, labels
 
-        G = self.num_groups
-        device = self.R.device
-        all_labels = []
-        for g in range(G):
-            cdf_list = self._group_cdf(g)
-            decoder = RansDecoder()
-            decoder.set_stream(byte_strings[g])
-            indices = decoder.decode_stream(
-                [0] * n_tokens,
-                [cdf_list] * n_tokens,
-                [self.K + 2] * n_tokens,
-                [0] * n_tokens,
+    def _tokens_from_labels(
+        self,
+        labels: torch.Tensor,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        batch_size: int,
+        n_tokens: int,
+    ) -> torch.Tensor:
+        label_index = labels.unsqueeze(-1).expand(
+            self.num_groups,
+            batch_size * n_tokens,
+            self.embedding_dim,
+        )
+        quantized = torch.gather(self.codebooks, 1, label_index)
+        rotated_hat = quantized.permute(1, 0, 2).reshape(
+            batch_size * n_tokens,
+            self.feat_dim,
+        )
+        normalized_hat = (rotated_hat @ self.R.T).reshape(
+            batch_size,
+            n_tokens,
+            self.feat_dim,
+        )
+        return denormalize_orfc_features(
+            normalized_hat,
+            mean,
+            std,
+            mode=self.norm_mode,
+            n_prefix=self.n_prefix,
+        )
+
+    @staticmethod
+    def _serialize_stats(mean: torch.Tensor, std: torch.Tensor) -> bytes:
+        stats = torch.stack((mean, std), dim=0).detach().cpu().float().numpy()
+        return np.asarray(stats, dtype=_STATS_DTYPE).tobytes(order="C")
+
+    def _deserialize_stats(
+        self,
+        payload: bytes,
+        stats_shape: tuple[int, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        expected_values = 2 * int(np.prod(stats_shape))
+        values = np.frombuffer(payload, dtype=_STATS_DTYPE)
+        if values.size != expected_values:
+            raise ValueError(
+                f"ORFC normalization stream has {values.size} floats; expected {expected_values}"
             )
-            all_labels.append(torch.tensor(indices, dtype=torch.int64, device=device))
-        return torch.stack(all_labels)  # (G, n_tokens)
+        stats = (
+            torch.from_numpy(values.copy()).reshape(2, *stats_shape).to(self.R.device)
+        )
+        return stats[0], stats[1]
 
-    # ------------------------------------------------------------------ #
-    # Latent-codec API
-    # ------------------------------------------------------------------ #
     def forward(self, h, token_res=None, qp=0, **kwargs):
-        B, N, _ = h.shape
-        mu, std, labels = self._assign_labels(h)
-        h_hat = self._tokens_from_labels(labels, mu, std, B, N)
-        return {"h_hat": h_hat, "bits": {"orfc": self._actual_bits(labels)}}
-
-    def compress(self, h, token_res=None, qp=0, **kwargs):
-        B, N, D = h.shape
-        mu, std, labels = self._assign_labels(h)
-        byte_strings = self._rans_encode(labels)
-        if byte_strings is not None:
-            return {
-                "strings": {"orfc": [[bs] for bs in byte_strings]},
-                "pstate": {
-                    "shape": (int(B), int(N), int(D)),
-                    "mu": mu.cpu(),
-                    "std": std.cpu(),
-                },
-            }
-        # No entropy model available: fall back to fixed-rate bits and keep the
-        # raw labels so decompression can still reconstruct exactly.
+        batch_size, n_tokens, _ = h.shape
+        mean, std, labels = self._assign_labels(h)
+        h_hat = self._tokens_from_labels(labels, mean, std, batch_size, n_tokens)
+        stats_likelihoods = torch.full(
+            (mean.numel() + std.numel(),),
+            2.0**-32,
+            dtype=torch.float32,
+            device=h.device,
+        )
         return {
-            "bits": {"orfc": self._theoretical_bits(N)},
-            "pstate": {
-                "shape": (int(B), int(N), int(D)),
-                "mu": mu.cpu(),
-                "std": std.cpu(),
-                "labels": labels.cpu(),
+            "h_hat": h_hat,
+            "likelihoods": {
+                "orfc": self.entropy_model(labels),
+                "orfc_stats": stats_likelihoods,
             },
         }
 
-    def decompress(self, strings=None, pstate=None, **kwargs):
-        B, N, D = pstate["shape"]
-        device = self.R.device
-        mu = pstate["mu"].to(device)
-        std = pstate["std"].to(device)
+    def compress(self, h, token_res=None, qp=0, **kwargs):
+        batch_size, n_tokens, feature_dim = h.shape
+        mean, std, labels = self._assign_labels(h)
+        streams = self.entropy_model.compress(labels)
+        return {
+            "strings": {
+                "orfc": [[stream] for stream in streams],
+                "orfc_stats": [[self._serialize_stats(mean, std)]],
+            },
+            "pstate": {
+                "shape": (int(batch_size), int(n_tokens), int(feature_dim)),
+                "stats_shape": tuple(int(value) for value in mean.shape),
+            },
+        }
 
-        if strings is not None and "orfc" in strings:
-            byte_strings = [s[0] for s in strings["orfc"]]
-            labels = self._rans_decode(byte_strings, B * N)
-        else:
-            labels = pstate["labels"].to(device)
+    def decompress(self, strings, pstate, **kwargs):
+        batch_size, n_tokens, feature_dim = map(int, pstate["shape"])
+        if feature_dim != self.feat_dim:
+            raise ValueError(
+                f"ORFC stream feature dimension is {feature_dim}; expected {self.feat_dim}"
+            )
+        try:
+            label_streams = [stream[0] for stream in strings["orfc"]]
+            stats_stream = strings["orfc_stats"][0][0]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(
+                "ORFC coded unit is missing label or normalization streams"
+            ) from exc
 
-        h_hat = self._tokens_from_labels(labels, mu, std, B, N)
+        labels = self.entropy_model.decompress(
+            label_streams,
+            num_samples=batch_size * n_tokens,
+        )
+        mean, std = self._deserialize_stats(
+            stats_stream,
+            tuple(int(value) for value in pstate["stats_shape"]),
+        )
+        h_hat = self._tokens_from_labels(labels, mean, std, batch_size, n_tokens)
         return {"h_hat": h_hat}

@@ -20,15 +20,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 PROJECT_ROOT = os.getenv("PROJECT_ROOT", os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
 
 OFFLINE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, OFFLINE_DIR)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "cofai", "entropy_models"))
-sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, str(SOURCE_ROOT))
 
 import compressai  # noqa: F401
 
-from orfc_model import batch_normalize_gpu, batch_inv_normalize_gpu, batched_assign
+from cofai.latent_codecs.orfc_normalization import (
+    denormalize_orfc_features,
+    normalize_orfc_features,
+)
+from cofai.ops.orfc import batched_assign
 from utils import set_seed, preload_features, load_gt, evaluate_accuracy
 from backbone.wrapper import Dinov2Wrapper, ClipWrapper
 
@@ -131,7 +135,7 @@ def rans_encode_per_image(features, codebooks, embedding_dim, device,
         X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
         B, T, _ = X.shape
         with torch.no_grad():
-            Y, _, _ = batch_normalize_gpu(X, mode='per_image')
+            Y, _, _ = normalize_orfc_features(X, mode='per_image')
             flat = Y.reshape(-1, C)
             Z = flat @ R_t
             z_3d = Z.reshape(-1, G, embedding_dim).permute(1, 0, 2).contiguous()
@@ -207,7 +211,7 @@ def pq_encode_decode_features(features, codebooks, embedding_dim, device,
         X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
         B = X.shape[0]
         with torch.no_grad():
-            Y, Mu, Std = batch_normalize_gpu(X, mode='per_image')
+            Y, Mu, Std = normalize_orfc_features(X, mode='per_image')
             flat = Y.reshape(-1, C)
             Z = flat @ R_t if R_t is not None else flat
             z_3d = Z.reshape(-1, num_groups, embedding_dim) \
@@ -216,7 +220,7 @@ def pq_encode_decode_features(features, codebooks, embedding_dim, device,
             flat_hat = z_hat_3d.permute(1, 0, 2).reshape(-1, C)
             Y_hat = flat_hat @ R_t.T if R_t is not None else flat_hat
             Y_hat = Y_hat.reshape(B, X.shape[1], C)
-            X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
+            X_hat = denormalize_orfc_features(Y_hat, Mu, Std)
         for i in range(B):
             all_xhat.append(X_hat[i].cpu().numpy())
         del X, Y, Mu, Std, Z, z_3d, z_hat_3d, flat_hat, Y_hat, X_hat
@@ -235,7 +239,7 @@ def pq_get_labels(features, codebooks, embedding_dim, device, R=None,
         end = min(start + chunk_images, len(features))
         X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
         with torch.no_grad():
-            Y, _, _ = batch_normalize_gpu(X, mode='per_image')
+            Y, _, _ = normalize_orfc_features(X, mode='per_image')
             flat = Y.reshape(-1, C)
             Z = flat @ R_t if R_t is not None else flat
             z_3d = Z.reshape(-1, num_groups, embedding_dim) \
