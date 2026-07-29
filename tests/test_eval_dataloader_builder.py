@@ -106,6 +106,7 @@ def test_run_eval_uses_default_dataloader_when_plan_has_no_dataloader_key(monkey
                 "output_dir": "",
                 "max_samples": 1,
                 "real": False,
+                "profile": False,
                 "quality": 1.0,
             },
             # cfg=plan (root is plan)
