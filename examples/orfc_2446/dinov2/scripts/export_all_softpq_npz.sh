@@ -4,24 +4,23 @@
 #
 # Usage:
 #   bash examples/orfc_2446/dinov2/scripts/export_all_softpq_npz.sh
-#   GPU_IDS=0,1,2,3,4,5 PYTHON=.venv/bin/python \
+#   GPU_IDS=0,1,2,3,4,5 \
 #       bash examples/orfc_2446/dinov2/scripts/export_all_softpq_npz.sh
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ORFC2446_DIR="$(dirname "$SCRIPT_DIR")"
-OFFLINE_DIR="$ORFC2446_DIR/offline"
-COFAI_ROOT="$(dirname "$(dirname "$(dirname "$ORFC2446_DIR")")")"
-FEATCODEC_ROOT="$(dirname "$COFAI_ROOT")"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
-PYTHON="${PYTHON:-python}"
-FEAT_ROOT="${FEAT_ROOT:-$FEATCODEC_ROOT/features}"
+ORFC2446_DIR="$COFAI_ROOT/examples/orfc_2446/dinov2"
+OFFLINE_DIR="$ORFC2446_DIR/offline"
+
+FEAT_ROOT="${FEAT_ROOT:-$COFAI_ROOT/features}"
 WEIGHTS_ROOT="${WEIGHTS_ROOT:-$COFAI_ROOT/weights/orfc_2446}"
 MAX_TRAIN_IMAGES="${MAX_TRAIN_IMAGES:-5000}"
 SKIP_EXISTING="${SKIP_EXISTING:-1}"
 GPU_IDS="${GPU_IDS:-0,1,2,3,4,5}"
 
-LOG_DIR="$ORFC2446_DIR/logs/export_npz"
+LOG_DIR="${LOG_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov2/export_npz}"
 mkdir -p "$LOG_DIR"
 
 IFS=',' read -ra GPUS <<< "$GPU_IDS"
@@ -101,7 +100,7 @@ run_job() {
     tag=$(basename "$ckpt" .pt)
     local log="$LOG_DIR/${tag}.log"
 
-    CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON "$OFFLINE_DIR/export_softpq_npz.py" \
+    CUDA_VISIBLE_DEVICES=$gpu_id poetry -C "$COFAI_ROOT" run python "$OFFLINE_DIR/export_softpq_npz.py" \
         --ckpt_path "$ckpt" \
         --backbone "$backbone" \
         --layer "$layer" \

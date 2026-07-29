@@ -17,20 +17,15 @@ for _p in (_COFAI_ROOT, _EXAMPLE_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-_ORFC2446_OFFLINE = _COFAI_ROOT / "examples/orfc_2446/dinov2/offline"
-if str(_ORFC2446_OFFLINE) not in sys.path:
-    sys.path.insert(0, str(_ORFC2446_OFFLINE))
-
 import compressai  # noqa: F401
 
-from cofai.entropy_models.soft_pq import load_codec, load_codec_meta
-from cofai.entropy_models.soft_pq_export import (
+from examples.orfc.offline.utils import preload_features
+from examples.orfc_2446.offline.soft_pq import load_codec, load_codec_meta
+from examples.orfc_2446.offline.artifacts import (
     compute_histogram_pmf,
     npz_path_for_codec,
     save_codec_npz,
 )
-from utils import preload_features
-
 from lib.config_utils import load_config, resolve_project_root
 from lib.orfc_codec import NORM_MODE_CHOICES, resolve_norm_settings
 
@@ -72,8 +67,7 @@ def export_one(
     norm_mode, n_prefix, norm_src = resolve_norm_settings(
         norm_mode=norm_mode,
         n_prefix=n_prefix,
-        ckpt_path=str(ckpt_path),
-        ckpt_meta=ckpt_meta,
+        artifact_meta=ckpt_meta,
         default_n_prefix=5,
     )
     print(f"  norm_mode={norm_mode}  n_prefix={n_prefix}  (source={norm_src})")
@@ -90,8 +84,18 @@ def export_one(
         batch_size=batch_size,
     )
     save_codec_npz(
-        codec, npz_path, pmf, source_pt=ckpt_path,
-        norm_mode=norm_mode, n_prefix=n_prefix,
+        codec,
+        npz_path,
+        pmf,
+        source_pt=ckpt_path,
+        norm_mode=norm_mode,
+        n_prefix=n_prefix,
+        metadata={
+            "proposal": "ORFC-2446",
+            "backbone": "dinov3_vitl16",
+            "layer": "blk23",
+            "slot": 24,
+        },
     )
     ent = -(pmf * np.log2(pmf + 1e-30)).sum(axis=1).mean()
     print(f"  [ok] {ckpt_path.name} -> {npz_path.name} (n={len(features)}, H={ent:.4f})")
@@ -110,8 +114,10 @@ def main():
     p.add_argument("--max_train", type=int, default=defaults.get("max_train", 1000))
     p.add_argument("--seed", type=int, default=defaults.get("seed", 42))
     p.add_argument(
-        "--norm_mode", choices=NORM_MODE_CHOICES, default=None,
-        help="Feature norm (default: auto from ckpt meta/filename)",
+        "--norm_mode",
+        choices=NORM_MODE_CHOICES,
+        default=None,
+        help="Feature norm (default: read from checkpoint metadata)",
     )
     p.add_argument("--n_prefix", type=int, default=0)
     p.add_argument("--batch_size", type=int, default=defaults.get("batch_size", 4))

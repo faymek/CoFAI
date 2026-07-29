@@ -7,6 +7,9 @@ from pathlib import Path
 import yaml
 
 
+SOURCE_ROOT = Path(__file__).resolve().parents[4]
+
+
 def resolve_project_root() -> Path:
     import os
 
@@ -15,14 +18,13 @@ def resolve_project_root() -> Path:
         env = Path(raw)
         if env.is_dir():
             return env.resolve()
-    # examples/orfc_2446/dinov3/lib/config_utils.py -> parents[4] = CoFAI root
-    return Path(__file__).resolve().parents[4]
+    return SOURCE_ROOT
 
 
 def load_config(config_path: Path | None = None) -> dict:
     root = resolve_project_root()
     if config_path is None:
-        config_path = root / "examples/orfc_2446/dinov3/configs/dinov3_blk23.yaml"
+        config_path = SOURCE_ROOT / "examples/orfc_2446/dinov3/configs/dinov3_blk23.yaml"
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 

@@ -4,15 +4,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ORFC2446_DIR="$(dirname "$SCRIPT_DIR")"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+ORFC2446_DIR="$COFAI_ROOT/examples/orfc_2446/dinov2"
 OFFLINE_DIR="$ORFC2446_DIR/offline"
-COFAI_ROOT="$(dirname "$(dirname "$(dirname "$ORFC2446_DIR")")")"
 
 FEAT_ROOT="${FEAT_ROOT:-$COFAI_ROOT/features/orfc}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-$COFAI_ROOT/weights/orfc_2446}"
-PYTHON="${PYTHON:-python}"
 
-LOG_DIR="$ORFC2446_DIR/logs/train"
+LOG_DIR="${LOG_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov2/train}"
 mkdir -p "$LOG_DIR"
 
 NUM_GPUS="${NUM_GPUS:-4}"
@@ -132,8 +132,7 @@ run_job() {
     local tag="${backbone}_${layer}_K${K}_emb${emb}_bt${bt}_ws${rate_tag}_tau${tau}_lr${lr}_ep${epochs}"
     local log="$LOG_DIR/${tag}.log"
 
-    cd "$OFFLINE_DIR" && \
-    CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON train_soft_pq.py \
+    CUDA_VISIBLE_DEVICES=$gpu_id poetry -C "$COFAI_ROOT" run python "$OFFLINE_DIR/train_soft_pq.py" \
         --backbone "$backbone" --layer "$layer" \
         --K "$K" --embedding_dim "$emb" \
         --bottleneck_dim "$bt" \

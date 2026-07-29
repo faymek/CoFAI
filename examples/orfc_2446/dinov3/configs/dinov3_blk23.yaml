@@ -9,15 +9,15 @@ embed_dim: 1024
 n_prefix: 5
 n_storage_tokens: 4
 
-# COCO train features are 640x480 -> short-side 1024 -> 64x85 patches
-coco_token_hw: [64, 85]
+# ADE train images are 683x512 (W x H) -> pad16 -> 32x43 patches.
+train_token_hw: [32, 43]
 
 paths:
-  train_feat_dir: ../ORFC/features/train/dinov3_vitl16_coco/blk23
-  val_feat_root: features/dinov3_vitl16_slot24
-  weights_dir: weights/orfc_2446_dinov3
-  results_dir: examples/orfc_2446/dinov3/results
-  backbone: weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.pth
+  train_feat_dir: features/orfc_2446/dinov3/ade
+  val_feat_root: features/orfc_2446/dinov3/validation
+  weights_dir: weights/orfc_2446/dinov3_vitl16
+  results_dir: logs/orfc_2446/dinov3/offline_replay/results
+  backbone: weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
   semseg_head: weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
   depth_head: weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
 
@@ -66,12 +66,12 @@ train_defaults:
   epochs: 30
   lr: 3.0e-4
   batch_size: 4
-  max_train: 1000
+  max_train: 5000
   n_val: 50
   lmbda: 0.0
   tau_start: 0.5
   tau_end: 0.005
-  norm_mode: split_cls_patch
+  norm_mode: split_reg_cls_patch
   embedding_dim: 32
   kmeans_max_samples: 2000000
   seed: 42

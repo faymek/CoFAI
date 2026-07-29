@@ -11,22 +11,21 @@
 #
 # Usage:
 #   bash examples/orfc_2446/dinov2/scripts/train_vitl14_k4.sh
-#   PYTHON=/data4/workspace/zlt/featcodec/CoFAI/.venv/bin/python NUM_GPUS=4 \
+#   NUM_GPUS=4 \
 #       bash examples/orfc_2446/dinov2/scripts/train_vitl14_k4.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ORFC2446_DIR="$(dirname "$SCRIPT_DIR")"
-OFFLINE_DIR="$ORFC2446_DIR/offline"
-COFAI_ROOT="$(dirname "$(dirname "$(dirname "$ORFC2446_DIR")")")"
-FEATCODEC_ROOT="$(dirname "$COFAI_ROOT")"
+COFAI_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
-FEAT_ROOT="${FEAT_ROOT:-$FEATCODEC_ROOT/features}"
+ORFC2446_DIR="$COFAI_ROOT/examples/orfc_2446/dinov2"
+OFFLINE_DIR="$ORFC2446_DIR/offline"
+
+FEAT_ROOT="${FEAT_ROOT:-$COFAI_ROOT/features}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-$COFAI_ROOT/weights/orfc_2446}"
-PYTHON="${PYTHON:-python}"
 NUM_GPUS="${NUM_GPUS:-4}"
 
-LOG_DIR="$ORFC2446_DIR/logs/train_vitl14_k4"
+LOG_DIR="${LOG_DIR:-$COFAI_ROOT/logs/orfc_2446/dinov2/train_vitl14_k4}"
 mkdir -p "$LOG_DIR"
 
 # Job format: "layer lmbda lr epochs"
@@ -87,8 +86,7 @@ run_job() {
     local tag="${BACKBONE}_${layer}_K${K}_emb${EMB}_bt${BT}_ws${rate_tag}_tau${TAU}_lr${lr}_ep${epochs}"
     local log="$LOG_DIR/${tag}.log"
 
-    cd "$OFFLINE_DIR" && \
-    CUDA_VISIBLE_DEVICES=$gpu_id $PYTHON train_soft_pq.py \
+    CUDA_VISIBLE_DEVICES=$gpu_id poetry -C "$COFAI_ROOT" run python "$OFFLINE_DIR/train_soft_pq.py" \
         --backbone "$BACKBONE" \
         --layer "$layer" \
         --K "$K" \

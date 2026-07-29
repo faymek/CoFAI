@@ -24,34 +24,33 @@ for _p in (_COFAI_ROOT, _EXAMPLE_DIR):
         sys.path.insert(0, str(_p))
 
 from cofai.backbone import Dinov3TimmBackbone
-from cofai.entropy_models.orfc_model import (
+from cofai.ops.orfc import (
     batched_assign,
-    batch_normalize_gpu,
     learn_orfc_rotation,
 )
-from cofai.entropy_models.soft_pq import (
+from examples.orfc_2446.offline.soft_pq import (
     OrthogonalTransform,
     save_codec,
     train_soft_pq,
 )
-from cofai.entropy_models.soft_pq_export import (
+from examples.orfc_2446.offline.artifacts import (
     compute_histogram_pmf,
     save_codec_npz,
 )
+from cofai.latent_codecs.orfc_normalization import normalize_orfc_features
 
 from lib.config_utils import load_config, resolve_project_root
-from lib.dinov3_frozen_tail import build_dinov3_tail
 from lib.distortion_metrics import eval_val_distortion
-from lib.orfc_codec import NORM_MODE_CHOICES, resolve_n_prefix
+from lib.orfc_codec import NORM_MODE_CHOICES, resolve_norm_settings
 
-_ORFC2446_OFFLINE = _COFAI_ROOT / "examples/orfc_2446/dinov2/offline"
-if str(_ORFC2446_OFFLINE) not in sys.path:
-    sys.path.insert(0, str(_ORFC2446_OFFLINE))
-from utils import preload_features, set_seed  # noqa: E402
+from examples.orfc.offline.utils import preload_features, set_seed  # noqa: E402
 
 
 def _split_train_val_paths(
-    feat_dir: Path, max_train: int, n_val: int, seed: int,
+    feat_dir: Path,
+    max_train: int,
+    n_val: int,
+    seed: int,
 ) -> tuple[list[Path], list[Path]]:
     """Shuffle file paths only — do not preload train features into RAM."""
     files = sorted(feat_dir.glob("*.npy"))
@@ -98,7 +97,7 @@ def _infer_token_hw_from_feat(path: Path, n_prefix: int) -> tuple[int, int] | No
     # Nearest-to-square factorization
     best = None
     best_score = 1e18
-    for h in range(1, int(n_patch ** 0.5) + 1):
+    for h in range(1, int(n_patch**0.5) + 1):
         if n_patch % h == 0:
             w = n_patch // h
             score = abs(h - w)
@@ -150,11 +149,11 @@ def _sample_opq_vectors(
     for start in range(0, len(order), chunk_images):
         if n_tok >= max_flat:
             break
-        batch_paths = [train_paths[int(i)] for i in order[start:start + chunk_images]]
+        batch_paths = [train_paths[int(i)] for i in order[start : start + chunk_images]]
         batch = np.stack([np.load(p).astype(np.float32) for p in batch_paths])
         X = torch.from_numpy(batch).float().to(device)
         with torch.no_grad():
-            Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
+            Y, _, _ = normalize_orfc_features(X, mode=norm_mode, n_prefix=n_prefix)
         vecs = _norm_vectors_from_batch(Y, D)
         chunks.append(vecs)
         n_tok += vecs.shape[0]
@@ -164,14 +163,13 @@ def _sample_opq_vectors(
     del chunks
     if full.shape[0] > max_flat:
         full = full[rng.choice(full.shape[0], max_flat, replace=False)]
-    print(f"  OPQ sample: {n_img} images → {full.shape[0]} token vectors "
-          f"(cap={max_flat})")
+    print(f"  OPQ sample: {n_img} images → {full.shape[0]} token vectors " f"(cap={max_flat})")
     return full
 
 
 def _iter_path_batches(paths: list[Path], batch_size: int):
     for start in range(0, len(paths), batch_size):
-        batch_paths = paths[start:start + batch_size]
+        batch_paths = paths[start : start + batch_size]
         yield np.stack([np.load(p).astype(np.float32) for p in batch_paths])
 
 
@@ -183,8 +181,14 @@ def train_and_save(args) -> str:
     set_seed(args.seed)
 
     layer_idx = int(args.layer[-2:])
-    n_prefix = resolve_n_prefix(args.norm_mode, args.n_prefix, cfg.get("n_prefix", 5))
-    default_hw = tuple(cfg.get("coco_token_hw", [64, 85]))
+    norm_mode, n_prefix, _ = resolve_norm_settings(
+        norm_mode=args.norm_mode,
+        n_prefix=args.n_prefix,
+        default_n_prefix=cfg.get("n_prefix", 5),
+        fallback_norm=cfg.get("train_defaults", {}).get("norm_mode", "split_cls_patch"),
+    )
+    args.norm_mode = norm_mode
+    default_hw = tuple(cfg.get("train_token_hw", [32, 43]))
     D = cfg["embed_dim"]
     G = D // args.embedding_dim
 
@@ -201,7 +205,10 @@ def train_and_save(args) -> str:
     print(f"{'#' * 70}")
 
     train_paths, val_paths = _split_train_val_paths(
-        feat_dir, args.max_train, args.n_val, args.seed,
+        feat_dir,
+        args.max_train,
+        args.n_val,
+        args.seed,
     )
     sample = np.load(train_paths[0])
     feat_shape = sample.shape
@@ -211,8 +218,10 @@ def train_and_save(args) -> str:
         inferred = _infer_token_hw_from_feat(train_paths[0], n_prefix)
         if inferred is not None:
             token_hw = inferred
-    print(f"  train={len(train_paths)}  val={len(val_paths)}  "
-          f"shape={feat_shape}  token_hw={token_hw}  (path-mode lazy)")
+    print(
+        f"  train={len(train_paths)}  val={len(val_paths)}  "
+        f"shape={feat_shape}  token_hw={token_hw}  (path-mode lazy)"
+    )
 
     # Val is small — preload for metrics / SoftPQ val loop.
     val_feats, _ = preload_features(val_paths, num_workers=min(8, max(1, len(val_paths))))
@@ -233,7 +242,7 @@ def train_and_save(args) -> str:
             ckpt_path=cfg["paths"]["backbone"],
             device=str(device),
         ).eval()
-        tail = build_dinov3_tail(backbone, layer_idx, token_hw, device)
+        tail = backbone.build_frozen_tail(layer_idx, token_hw, device)
         n_tail = len(getattr(tail, "blocks", []))
         precompute_teacher = n_tail > 0
         print(f"  tail blocks={n_tail} (+ norm)")
@@ -260,8 +269,14 @@ def train_and_save(args) -> str:
             device=device,
         )
         R_opq, cb_opq, _ = learn_orfc_rotation(
-            full_vecs, G, args.embedding_dim, args.K,
-            max_iter_orfc=20, max_iter_kmeans=100, device=device, verbose=False,
+            full_vecs,
+            G,
+            args.embedding_dim,
+            args.K,
+            max_iter_orfc=20,
+            max_iter_kmeans=100,
+            device=device,
+            verbose=False,
         )
         del full_vecs
         torch.cuda.empty_cache()
@@ -274,7 +289,11 @@ def train_and_save(args) -> str:
             for batch in _iter_path_batches(train_paths, 32):
                 X = torch.from_numpy(batch).float().to(device)
                 with torch.no_grad():
-                    Y, _, _ = batch_normalize_gpu(X, mode=args.norm_mode, n_prefix=n_prefix)
+                    Y, _, _ = normalize_orfc_features(
+                        X,
+                        mode=args.norm_mode,
+                        n_prefix=n_prefix,
+                    )
                     flat = Y.reshape(-1, D) @ R_t
                     sub = flat.reshape(-1, G, args.embedding_dim).permute(1, 0, 2).contiguous()
                     lbl = batched_assign(sub, cb_t, device=device)[1].cpu().numpy()
@@ -338,7 +357,8 @@ def train_and_save(args) -> str:
     ckpt_path = weights_dir / _ckpt_name(args, D, D)
     if getattr(args, "keep_pt", False):
         save_codec(
-            codec, str(ckpt_path),
+            codec,
+            str(ckpt_path),
             use_transform=args.use_transform,
             norm_mode=args.norm_mode,
             n_prefix=n_prefix,
@@ -350,7 +370,9 @@ def train_and_save(args) -> str:
         json.dump(history, f, indent=2, default=str)
 
     val_metrics = eval_val_distortion(
-        val_feats, codec, tail,
+        val_feats,
+        codec,
+        tail,
         norm_mode=args.norm_mode,
         n_prefix=n_prefix,
         device=device,
@@ -380,6 +402,12 @@ def train_and_save(args) -> str:
         source_pt=str(ckpt_path) if getattr(args, "keep_pt", False) else None,
         norm_mode=args.norm_mode,
         n_prefix=n_prefix,
+        metadata={
+            "proposal": "ORFC-2446",
+            "backbone": "dinov3_vitl16",
+            "layer": args.layer,
+            "slot": layer_idx + 1,
+        },
     )
     print(f"  Official NPZ → {npz_path}")
     print(f"  meta: norm_mode={args.norm_mode} n_prefix={n_prefix}")
@@ -392,10 +420,7 @@ def train_and_save(args) -> str:
         if last_val is not None:
             n_tok = val_feats[0].shape[0]
             implied_per_elem = last_val / max(n_tok * D, 1)
-            print(
-                f"  (train val_loss ep_last={last_val:.1f}  "
-                f"≈{implied_per_elem:.6f} per-element)"
-            )
+            print(f"  (train val_loss ep_last={last_val:.1f}  " f"≈{implied_per_elem:.6f} per-element)")
     print(f"  Val metrics → {val_metrics_path}")
     print(f"  Val MSE = {val_metrics['raw_mse']:.6f}")
     return str(npz_path)
@@ -408,12 +433,14 @@ def main():
     p.add_argument("--layer", type=str, default="blk23")
     p.add_argument("--K", type=int, required=True)
     p.add_argument("--embedding_dim", type=int, default=defaults.get("embedding_dim", 32))
-    p.add_argument("--norm_mode", choices=NORM_MODE_CHOICES,
-                   default=defaults.get("norm_mode", "split_cls_patch"))
+    p.add_argument("--norm_mode", choices=NORM_MODE_CHOICES, default=defaults.get("norm_mode", "split_cls_patch"))
     p.add_argument("--n_prefix", type=int, default=0)
-    p.add_argument("--token_hw", type=str, default=None,
-                   help="Patch grid H,W (e.g. 32,43 for ADE pad688x512). "
-                        "Auto-inferred from first feature when omitted.")
+    p.add_argument(
+        "--token_hw",
+        type=str,
+        default=None,
+        help="Patch grid H,W (e.g. 32,43 for ADE pad688x512). " "Auto-inferred from first feature when omitted.",
+    )
     p.add_argument("--epochs", type=int, default=defaults.get("epochs", 30))
     p.add_argument("--lr", type=float, default=defaults.get("lr", 3e-4))
     p.add_argument("--batch_size", type=int, default=defaults.get("batch_size", 4))
@@ -428,18 +455,21 @@ def main():
     p.add_argument("--mse_loss", action="store_true")
     p.add_argument("--max_train", type=int, default=defaults.get("max_train", 1000))
     p.add_argument("--n_val", type=int, default=defaults.get("n_val", 50))
-    p.add_argument("--kmeans_max_samples", type=int,
-                   default=defaults.get("kmeans_max_samples", 2_000_000))
-    p.add_argument("--use_transform", action="store_true", default=True,
-                   help="Learn orthogonal R + PQ (default)")
-    p.add_argument("--no_transform", dest="use_transform", action="store_false",
-                   help="No orthogonal R; k-means init + train codebooks only")
+    p.add_argument("--kmeans_max_samples", type=int, default=defaults.get("kmeans_max_samples", 2_000_000))
+    p.add_argument("--use_transform", action="store_true", default=True, help="Learn orthogonal R + PQ (default)")
+    p.add_argument(
+        "--no_transform",
+        dest="use_transform",
+        action="store_false",
+        help="No orthogonal R; k-means init + train codebooks only",
+    )
     p.add_argument("--feat_dir", type=str, default=None)
     p.add_argument("--weights_dir", type=str, default=None)
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--seed", type=int, default=defaults.get("seed", 42))
     p.add_argument(
-        "--keep_pt", action="store_true",
+        "--keep_pt",
+        action="store_true",
         help="Also save intermediate .pt for resume (eval uses .npz only)",
     )
     args = p.parse_args()

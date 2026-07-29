@@ -5,12 +5,10 @@ Soft-PQ Training — learn OrthogonalTransform + differentiable PQ codebooks.
 Trains codec via frozen-tail consistency loss (ΔL_ref) with optional rate loss.
 Requires pre-extracted features AND a backbone model (for building the frozen tail).
 
-Usage:
-    python train_soft_pq.py --backbone dinov2_vitl14 --layer blk10 \
+Usage (reuse the main Poetry environment):
+    PYTHONPATH="$SOURCE_ROOT" poetry -C "$PROJECT_ROOT" run python train_soft_pq.py \
+        --backbone dinov2_vitl14 --layer blk10 \
         --K 64 --embedding_dim 32 --epochs 100 --warm_start_opq
-
-    python train_soft_pq.py --backbone dinov2_vitg14 --layer blk19 \
-        --K 8 --embedding_dim 32 --lmbda 0.5 --tau_start 0.5 --lr 0.0003
 """
 
 import os
@@ -23,41 +21,42 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
-PROJECT_ROOT = os.getenv(
-    "PROJECT_ROOT",
-    os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-)
-
 OFFLINE_DIR = os.path.dirname(os.path.abspath(__file__))
+SOURCE_ROOT = Path(__file__).resolve().parents[4]
+load_dotenv(SOURCE_ROOT / ".env")
+PROJECT_ROOT = os.environ.get("PROJECT_ROOT")
+if not PROJECT_ROOT:
+    raise RuntimeError(f"PROJECT_ROOT is required; set it or add it to {SOURCE_ROOT / '.env'}")
 sys.path.insert(0, OFFLINE_DIR)
-sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, str(SOURCE_ROOT))
 
-from cofai.entropy_models.soft_pq import (
-    SoftPQ, OrthogonalTransform, FeatureTransform, FeatureCodec,
-    FrozenTail, CLIPFrozenTail,
-    train_soft_pq, save_codec,
+from examples.orfc_2446.offline.soft_pq import (
+    OrthogonalTransform,
+    FeatureTransform,
+    train_soft_pq,
+    save_codec,
 )
-from cofai.entropy_models.soft_pq_export import (
-    compute_histogram_pmf, save_codec_npz, npz_path_for_codec,
+from examples.orfc_2446.offline.artifacts import (
+    compute_histogram_pmf,
+    save_codec_npz,
 )
-from cofai.entropy_models.orfc_model import (
-    batch_normalize_gpu, batch_inv_normalize_gpu,
-    learn_orfc_rotation, batched_assign,
-)
-from utils import set_seed, preload_features
+from cofai.backbone import FrozenTail
+from cofai.latent_codecs.orfc_normalization import normalize_orfc_features
+from cofai.ops.orfc import learn_orfc_rotation
+from examples.orfc.offline.utils import preload_features, set_seed
 from weights_paths import codec_weights_dir
-from backbone.wrapper import Dinov2Wrapper, ClipWrapper
+from examples.orfc.offline.backbone.wrapper import Dinov2Wrapper
 
 import warnings
+
 warnings.filterwarnings("ignore", message="xFormers is available")
 warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
 
 try:
     import logging
     from mmcv.utils import get_logger
-    logger = get_logger('mmcv')
+
+    logger = get_logger("mmcv")
     logger.setLevel(logging.WARNING)
 except ImportError:
     pass
@@ -122,19 +121,15 @@ def train_and_save(args):
     val_features = [features_train[i] for i in val_idx]
 
     # ---- Load backbone (for frozen tail) ----
-    is_clip = args.backbone.startswith("clip")
-    if is_clip:
-        print(f"\n  Loading CLIP ViT-L/14...")
-        wrapper = ClipWrapper(args.classnames, device=device)
-    else:
-        print(f"\n  Loading DINOv2 ({args.backbone})...")
-        wrapper = Dinov2Wrapper(
-            head_layers=1, model_name=args.backbone,
-            weights_root=args.weights_root, device=device,
-        )
+    print(f"\n  Loading DINOv2 ({args.backbone})...")
+    wrapper = Dinov2Wrapper(
+        head_layers=1,
+        model_name=args.backbone,
+        weights_root=args.weights_root,
+        device=device,
+    )
 
-    n_blocks = len(wrapper.backbone.blocks)
-    tail_blocks = list(wrapper.backbone.blocks[layer_idx + 1:])
+    tail_blocks = list(wrapper.backbone.blocks[layer_idx + 1 :])
     norm_ref = wrapper.backbone.norm
     n_tail = len(tail_blocks)
     print(f"  Tail: {n_tail} blocks (blk{layer_idx+1}..blk{layer_idx+n_tail}) + norm")
@@ -153,11 +148,9 @@ def train_and_save(args):
     all_vectors = []
     for start in range(0, len(features_train_sub), 200):
         end = min(start + 200, len(features_train_sub))
-        X = torch.from_numpy(
-            np.stack(features_train_sub[start:end])
-        ).float().to(device)
+        X = torch.from_numpy(np.stack(features_train_sub[start:end])).float().to(device)
         with torch.no_grad():
-            Y, _, _ = batch_normalize_gpu(X, mode=args.norm_mode)
+            Y, _, _ = normalize_orfc_features(X, mode=args.norm_mode)
         all_vectors.append(Y.reshape(-1, D).cpu().numpy())
         del X, Y
     full_vectors = np.concatenate(all_vectors, axis=0)
@@ -171,9 +164,14 @@ def train_and_save(args):
         full_vectors = full_vectors[idx2]
 
     R_std, codebooks_std, hist_std = learn_orfc_rotation(
-        full_vectors, opq_groups, args.embedding_dim, args.K,
-        max_iter_orfc=20, max_iter_kmeans=100,
-        device=device, verbose=False,
+        full_vectors,
+        opq_groups,
+        args.embedding_dim,
+        args.K,
+        max_iter_orfc=20,
+        max_iter_kmeans=100,
+        device=device,
+        verbose=False,
     )
     std_time = time.time() - t0
     print(f"    OPQ done: MSE={hist_std[-1][0]:.8f} ({std_time:.1f}s)")
@@ -186,14 +184,11 @@ def train_and_save(args):
         opq_usage_counts = np.zeros((opq_groups, args.K), dtype=np.float64)
         for start in range(0, len(features_train_sub), 200):
             end = min(start + 200, len(features_train_sub))
-            X = torch.from_numpy(
-                np.stack(features_train_sub[start:end])
-            ).float().to(device)
+            X = torch.from_numpy(np.stack(features_train_sub[start:end])).float().to(device)
             with torch.no_grad():
-                Y, _, _ = batch_normalize_gpu(X, mode=args.norm_mode)
+                Y, _, _ = normalize_orfc_features(X, mode=args.norm_mode)
                 flat = Y.reshape(-1, D) @ R_t
-                sub = flat.reshape(-1, opq_groups, args.embedding_dim) \
-                      .permute(1, 0, 2).contiguous()
+                sub = flat.reshape(-1, opq_groups, args.embedding_dim).permute(1, 0, 2).contiguous()
                 dists = torch.cdist(sub, cb_t)
                 labels = dists.argmin(dim=-1)
                 for g in range(opq_groups):
@@ -211,12 +206,9 @@ def train_and_save(args):
     if wrapper.head is not None:
         wrapper.head.to(device)
 
-    tail_blocks_ref = list(wrapper.backbone.blocks[layer_idx + 1:])
+    tail_blocks_ref = list(wrapper.backbone.blocks[layer_idx + 1 :])
     norm_ref = wrapper.backbone.norm
-    if is_clip:
-        tail = CLIPFrozenTail(tail_blocks_ref, norm_ref, device=device)
-    else:
-        tail = FrozenTail(tail_blocks_ref, norm_ref, device=device)
+    tail = FrozenTail(tail_blocks_ref, norm_ref).to(device)
 
     # Move early blocks off GPU
     for i, blk in enumerate(wrapper.backbone.blocks):
@@ -298,11 +290,13 @@ def train_and_save(args):
     if args.freeze_codebooks:
         fz_tag += "_fzC"
     tau_tag = f"_tau{args.tau_start}" if args.tau_start > 0 else ""
-    ckpt_name = (f"{args.layer}_K{args.K}_emb{args.embedding_dim}"
-                 f"_{bt_tag}_{ws_tag}{mse_tag}{rate_tag}"
-                 f"{fz_tag}{tau_tag}"
-                 f"_lr{args.lr}_ep{args.epochs}"
-                 f"_n{args.max_train_images}_s{args.seed}")
+    ckpt_name = (
+        f"{args.layer}_K{args.K}_emb{args.embedding_dim}"
+        f"_{bt_tag}_{ws_tag}{mse_tag}{rate_tag}"
+        f"{fz_tag}{tau_tag}"
+        f"_lr{args.lr}_ep{args.epochs}"
+        f"_n{args.max_train_images}_s{args.seed}"
+    )
     # Optional intermediate .pt for resume; canonical eval/release artifact is .npz
     ckpt_path = os.path.join(out_dir, f"{ckpt_name}.pt")
     if getattr(args, "keep_pt", False):
@@ -310,7 +304,10 @@ def train_and_save(args):
 
     print(f"\n  Computing PMF from training features...")
     pmf = compute_histogram_pmf(
-        codec, features_train_sub, norm_mode=args.norm_mode, device=device,
+        codec,
+        features_train_sub,
+        norm_mode=args.norm_mode,
+        device=device,
     )
     npz_path = save_codec_npz(
         codec,
@@ -334,57 +331,47 @@ def main():
         description="Soft-PQ training — write evaluation .npz (R+codebooks+pmf)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--backbone", type=str, required=True,
-                        choices=["dinov2_vitl14", "dinov2_vitg14", "clip_vitl14"])
-    parser.add_argument("--layer", type=str, required=True,
-                        help="Layer name (e.g. blk05, blk10)")
-    parser.add_argument("--K", type=int, required=True,
-                        help="Codebook size")
-    parser.add_argument("--embedding_dim", type=int, default=32,
-                        help="Per-group embedding dimension")
-    parser.add_argument("--bottleneck_dim", type=int, default=0,
-                        help="Transform bottleneck dim (0=auto=D, use OrthogonalTransform)")
+    parser.add_argument("--backbone", type=str, required=True, choices=["dinov2_vitl14", "dinov2_vitg14"])
+    parser.add_argument("--layer", type=str, required=True, help="Layer name (e.g. blk05, blk10)")
+    parser.add_argument("--K", type=int, required=True, help="Codebook size")
+    parser.add_argument("--embedding_dim", type=int, default=32, help="Per-group embedding dimension")
+    parser.add_argument(
+        "--bottleneck_dim", type=int, default=0, help="Transform bottleneck dim (0=auto=D, use OrthogonalTransform)"
+    )
     parser.add_argument("--norm_mode", type=str, default="per_image")
 
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lmbda", type=float, default=0.5,
-                        help="R-D Lagrange multiplier (0=no rate loss)")
-    parser.add_argument("--tau_start", type=float, default=0.5,
-                        help="Initial temperature for soft PQ")
-    parser.add_argument("--tau_end", type=float, default=0.005,
-                        help="Final temperature (annealed)")
-    parser.add_argument("--tau_schedule", type=str, default="exponential",
-                        choices=["exponential", "linear"])
+    parser.add_argument("--lmbda", type=float, default=0.5, help="R-D Lagrange multiplier (0=no rate loss)")
+    parser.add_argument("--tau_start", type=float, default=0.5, help="Initial temperature for soft PQ")
+    parser.add_argument("--tau_end", type=float, default=0.005, help="Final temperature (annealed)")
+    parser.add_argument("--tau_schedule", type=str, default="exponential", choices=["exponential", "linear"])
     parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--prior_floor", type=float, default=0.0)
 
-    parser.add_argument("--warm_start_opq", action="store_true", default=True,
-                        help="Warm-start from OPQ solution")
-    parser.add_argument("--no_warm_start", dest="warm_start_opq",
-                        action="store_false")
+    parser.add_argument("--warm_start_opq", action="store_true", default=True, help="Warm-start from OPQ solution")
+    parser.add_argument("--no_warm_start", dest="warm_start_opq", action="store_false")
     parser.add_argument("--freeze_transform", action="store_true")
     parser.add_argument("--freeze_codebooks", action="store_true")
-    parser.add_argument("--mse_loss", action="store_true",
-                        help="Use MSE loss instead of ΔL_ref")
+    parser.add_argument("--mse_loss", action="store_true", help="Use MSE loss instead of ΔL_ref")
 
     parser.add_argument("--max_train_images", type=int, default=5000)
     parser.add_argument("--kmeans_max_samples", type=int, default=2_000_000)
     parser.add_argument("--n_val", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
 
-    parser.add_argument("--feat_root", type=str,
-                        default=os.path.join(PROJECT_ROOT, "features", "orfc"))
-    parser.add_argument("--weights_dir", type=str,
-                        default=os.path.join(PROJECT_ROOT, "weights", "orfc_2446"))
-    parser.add_argument("--weights_root", type=str,
-                        default=os.path.join(PROJECT_ROOT, "weights", "pretrained"),
-                        help="Pretrained backbone weights root")
-    parser.add_argument("--classnames", type=str,
-                        default=os.path.join(OFFLINE_DIR, "cfg", "classnames.txt"))
+    parser.add_argument("--feat_root", type=str, default=os.path.join(PROJECT_ROOT, "features", "orfc"))
+    parser.add_argument("--weights_dir", type=str, default=os.path.join(PROJECT_ROOT, "weights", "orfc_2446"))
     parser.add_argument(
-        "--keep_pt", action="store_true",
+        "--weights_root",
+        type=str,
+        default=os.path.join(PROJECT_ROOT, "weights", "pretrained"),
+        help="Pretrained backbone weights root",
+    )
+    parser.add_argument(
+        "--keep_pt",
+        action="store_true",
         help="Also save intermediate .pt for resume (eval/release use .npz only)",
     )
 
@@ -392,5 +379,5 @@ def main():
     train_and_save(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
