@@ -252,7 +252,7 @@ PASCAL-Context 数据集在样本 dict 中同时提供多个 GT 字段（如 `se
 
 ### 5.5 码率统计
 
-**契约**：自定义 codec 或 **`compress`/`decompress`** 返回结构时，须返回兼容性的 coded_unit 或者 coded_data 字典。之后由 _bits_from_coded_data 解析得到 **`bits`**。
+**契约**：自定义 codec 或 **`compress`/`decompress`** 返回结构时，须返回兼容性的 coded_unit 或者 coded_data 字典。之后由 `cofai.engine.bitrate.bits_from_coded_data` 解析得到 **`bits`**。
 
 对于每个sample，可以访问其 meta 获取 ori_size，之后根据 ori_size 计算 bpp。对于每个特征，模型可以实现 get_feature_numel 方法，返回该特征的元素数量，以计算 bpfp。
 
