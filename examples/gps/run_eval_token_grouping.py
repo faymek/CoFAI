@@ -81,7 +81,22 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
         raise RuntimeError("the model probe did not collect any query token maps")
 
     feature_dim = int(tg.feature_dimension)
-    bit_depth = int(tg.feature_bit_depth)
+    actual_bits = dict(task.get("bits") or {})
+    actual_feature_bits = actual_bits.get("feature")
+    if actual_feature_bits is None:
+        raise RuntimeError("real codec result is missing the `feature` stream")
+    feature_values = sum(
+        (len(record.kept_indices) + 1) * feature_dim for record in records
+    )
+    if feature_values <= 0 or not float(actual_feature_bits).is_integer():
+        raise RuntimeError("raw feature stream must contain an integer bit count")
+    feature_bits_total = int(actual_feature_bits)
+    bit_depth, remainder = divmod(feature_bits_total, feature_values)
+    if remainder:
+        raise RuntimeError(
+            "raw feature stream does not have a constant integer bit depth"
+        )
+
     bitrate_rows = []
     for record in records:
         kept_count = len(record.kept_indices)
@@ -110,13 +125,12 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
             "real codec/query grouping mismatch: "
             f"{coded_groups} coded groups versus {len(records)} selection records"
         )
-    actual_bits = dict(task.get("bits") or {})
-    expected_fp16 = sum(int(row["feature_bits"]) for row in bitrate_rows)
+    expected_feature = sum(int(row["feature_bits"]) for row in bitrate_rows)
     expected_map = sum(int(row["map_bits"]) for row in bitrate_rows)
-    if actual_bits.get("fp16") != float(expected_fp16):
+    if actual_feature_bits != float(expected_feature):
         raise RuntimeError(
-            f"FP16 stream mismatch: expected {expected_fp16}, got "
-            f"{actual_bits.get('fp16')}"
+            f"raw feature stream mismatch: expected {expected_feature}, got "
+            f"{actual_feature_bits}"
         )
     if actual_bits.get("selection_map", 0.0) != float(expected_map):
         raise RuntimeError(
@@ -140,6 +154,7 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
         "R10": 100.0 * float(task["rank10"]),
         "num_groups": len(records),
         "n_tokens": records[0].n_tokens,
+        "feature_bit_depth": bit_depth,
         "kept_count_mean": mean(row["kept_tokens"] for row in bitrate_rows),
         "keep_ratio_mean": mean(row["keep_ratio"] for row in bitrate_rows),
         "bpfp_feat_mean": mean(row["feature_bpfp"] for row in bitrate_rows),

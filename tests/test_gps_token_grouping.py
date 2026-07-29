@@ -68,7 +68,8 @@ def test_graph_grouping_rejects_invalid_structural_inputs():
         )
 
 
-def test_summary_counts_complete_map_stream():
+@pytest.mark.parametrize("feature_bit_depth", [8, 16])
+def test_summary_counts_complete_map_stream(feature_bit_depth):
     record = ProbeRecord(
         n_tokens=16,
         kept_indices=list(range(0, 16, 2)),
@@ -76,12 +77,11 @@ def test_summary_counts_complete_map_stream():
     )
     grouping_config = SimpleNamespace(
         feature_dimension=8,
-        feature_bit_depth=16,
         timing_repeats=1,
         warmup=0,
     )
     encoded = encode_selection_indices(record.kept_indices, record.n_tokens)
-    feature_bits = (len(record.kept_indices) + 1) * 8 * 16
+    feature_bits = (len(record.kept_indices) + 1) * 8 * feature_bit_depth
 
     summary = summarize_run(
         [record],
@@ -91,7 +91,7 @@ def test_summary_counts_complete_map_stream():
             "rank5": 0.7,
             "rank10": 0.8,
             "bits": {
-                "fp16": float(feature_bits),
+                "feature": float(feature_bits),
                 "selection_map": float(encoded.stream_bits),
             },
             "coded_groups": 1,
@@ -102,6 +102,7 @@ def test_summary_counts_complete_map_stream():
 
     assert summary["bpfp_map_mean"] == encoded.stream_bits / record.n_tokens
     assert summary["bpfp_feat_mean"] == feature_bits / record.n_tokens
+    assert summary["feature_bit_depth"] == feature_bit_depth
     assert summary["map_recovery_accuracy"] == 1.0
 
 

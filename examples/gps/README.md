@@ -3,7 +3,7 @@
 本目录将 GPS 集成到 CoFAI，包含两部分评估：
 
 1. AI M2405：基于 GPS 的多视角车辆检索评估。
-2. AI M2460：Token Grouping 的真实 FP16 码率和结构侧信息评估。
+2. AI M2460：Token Grouping 的真实原生 dtype 码率和结构侧信息评估。
 
 GPS 的公共实现位于 `cofai/token_grouping/` 和
 `cofai/token_codecs/token_selection_map.py`；数据集、模型和任务评估代码仅
@@ -15,7 +15,7 @@ GPS 的公共实现位于 `cofai/token_grouping/` 和
 
 ```text
 GPSReIDBackbone.encode（内部执行多层 GPS）
-→ FP16Codec
+→ RawDtypeCodec（当前 dtype=float16）
 → post_process=None（预留变量，当前直接透传）
 → GPSReIDBackbone.decode（尾部 Transformer）
 → GPSReIDHead（原 bottleneck 与 embedding 拼接）
@@ -40,12 +40,14 @@ ReID 的 `pid`、`camid`、图像路径和三视角分组关系属于数据 batc
 GPS encoder 内部生成的 `lsort` 只用于特征分组，不进入 Feature DU；
 evaluator 从 collate 后的 batch meta 推导 grouped embedding 对应的样本。
 
-特征码流使用真实 `FP16Codec` 序列化，包括一个 CLS token 和全部 retained
-patch tokens。码流保持 eval 引擎现有的扁平结构：
+特征码流使用真实 `RawDtypeCodec` 序列化，包括一个 CLS token 和全部 retained
+patch tokens。该 codec 通过 PyTorch 原生浮点 dtype 完成数值量化，再直接传输
+连续原始字节；当前配置为 `float16`，也支持 `bfloat16` 和 PyTorch 提供的
+`float8` dtype。码流保持 eval 引擎现有的扁平结构：
 
 ```python
 strings = {
-    "fp16": [[feature_bytes]],
+    "feature": [[feature_bytes]],
     "selection_map": [[map_bytes]],
 }
 ```
@@ -92,7 +94,7 @@ cofai/
 ├── models/
 │   └── common.py                       # 探索性 CommonFeatureCodecModel
 ├── latent_codecs/
-│   └── fp16.py                         # 真实 FP16 特征码流
+│   └── raw_dtype.py                    # 原生 dtype 数值量化与原始特征码流
 ├── token_grouping/
 │   └── gps.py                         # GPS 图划分 Token Grouping 公共实现
 └── token_codecs/
@@ -123,7 +125,7 @@ examples/gps/
 
 ## AI M2405：ReID 评估
 
-`run_eval_reid.py` 加载 GPS 主干和对应 checkpoint，执行真实 FP16
+`run_eval_reid.py` 加载 GPS 主干和对应 checkpoint，执行配置 dtype 的真实
 compress/decompress、query 三视角融合和 gallery 单视角检索，并输出 mAP、
 Rank-1、Rank-5、Rank-10、各 stream bits 和推理耗时。
 
@@ -156,7 +158,7 @@ examples/gps/config/token_grouping.yml
 默认扫描 `rho=0.0,0.1,...,0.9`，记录以下字段：
 
 - token 保留数量和保留率。
-- 完整 compact tensor（CLS + retained patches）的 FP16 bits、map bits 和
+- 完整 compact tensor（CLS + retained patches）的 feature bits、map bits 和
   total BPFP。
 - 结构侧信息占比和相对稠密码流的 rate saving。
 - token map 的独立码流 round-trip 与解码耗时。它只校验结构侧信息，
@@ -180,9 +182,9 @@ CUDA_VISIBLE_DEVICES=0 poetry run python examples/gps/run_eval_token_grouping.py
   --output logs/gps/MuRI/token_grouping.csv
 ```
 
-该入口实际执行 FP16 序列化和反序列化；汇总公式会与真实 `fp16` /
-`selection_map` 字节数逐项交叉检查。FP16 是本提案当前定义的直接传输
-codec，而不是熵编码结果。
+该入口实际执行原生 dtype 序列化和反序列化；汇总公式会从真实 `feature`
+码流自动推导每个数值的 bit depth，并与 `selection_map` 字节数逐项交叉
+检查。当前 `dtype=float16` 是本提案的直接传输工作点，而不是熵编码结果。
 
 
 

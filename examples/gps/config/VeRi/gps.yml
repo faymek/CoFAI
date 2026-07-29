@@ -5,7 +5,8 @@ checkpoint: ${project_root:}/weights/gps/VeRi/transformer.pth
 codec_model:
   type: CommonFeatureCodecModel
   codec:
-    type: cofai.latent_codecs.FP16Codec
+    type: cofai.latent_codecs.RawDtypeCodec
+    dtype: float16
   post_process: null
 dataset:
   name: veri
