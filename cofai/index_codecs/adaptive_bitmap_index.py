@@ -98,9 +98,6 @@ class AdaptiveBitmapIndexCodec(nn.Module):
     selected representation, total index count, and retained index count.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def encode(self, indices, universe_size: int) -> EncodedIndexSet:
         """Encode indices using the smaller bitmap or fixed-width index payload."""
         values = _validate_indices(indices, universe_size)

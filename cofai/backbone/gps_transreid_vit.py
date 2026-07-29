@@ -1,33 +1,15 @@
 import math
+from collections.abc import Iterable
 from functools import partial
-from itertools import repeat
 
 import torch
 import torch.nn as nn
 
 from cofai.token_grouping import GPSTokenGrouper
 
-# The public GPS evaluation path uses the transformer backbone only.
-# from torch._six import container_abcs
-TORCH_MAJOR = int(torch.__version__.split(".")[0])
-TORCH_MINOR = int(torch.__version__.split(".")[1])
-if TORCH_MAJOR == 1 and TORCH_MINOR < 8:
-    from torch._six import container_abcs
-else:
-    import collections.abc as container_abcs
 
-
-# From PyTorch internals
-def _ntuple(n):
-    def parse(x):
-        if isinstance(x, container_abcs.Iterable):
-            return x
-        return tuple(repeat(x, n))
-
-    return parse
-
-
-to_2tuple = _ntuple(2)
+def to_2tuple(value):
+    return tuple(value) if isinstance(value, Iterable) else (value, value)
 
 
 def drop_path(x, drop_prob: float = 0.0, training: bool = False):
@@ -56,7 +38,7 @@ class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks)."""
 
     def __init__(self, drop_prob=None):
-        super(DropPath, self).__init__()
+        super().__init__()
         self.drop_prob = drop_prob
 
     def forward(self, x):
@@ -110,34 +92,32 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, x_kv=None):
-        if x_kv is None:
-            B, N, C = x.shape
-            qkv = (
-                self.qkv(x)
-                .reshape(B, N, 3, self.num_heads, C // self.num_heads)
-                .permute(2, 0, 3, 1, 4)
+    def forward(self, x):
+        batch, sequence_length, channels = x.shape
+        qkv = (
+            self.qkv(x)
+            .reshape(
+                batch,
+                sequence_length,
+                3,
+                self.num_heads,
+                channels // self.num_heads,
             )
-            q, k, v = (
-                qkv[0],
-                qkv[1],
-                qkv[2],
-            )  # make torchscript happy (cannot use tensor as tuple)
-
-            attn_origin = (q @ k.transpose(-2, -1)) * self.scale
-            attn_probs = attn_origin.softmax(dim=-1)
-
-            attn = self.attn_drop(attn_probs)
-
-            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-            x = self.proj(x)
-            x = self.proj_drop(x)
-            return x, attn_probs
-            # return x
-
-        else:
-            assert 1 == 0
-            pass
+            .permute(2, 0, 3, 1, 4)
+        )
+        query, key, value = qkv.unbind(0)
+        attention_probs = ((query @ key.transpose(-2, -1)) * self.scale).softmax(dim=-1)
+        attention = self.attn_drop(attention_probs)
+        x = (
+            (attention @ value)
+            .transpose(1, 2)
+            .reshape(
+                batch,
+                sequence_length,
+                channels,
+            )
+        )
+        return self.proj_drop(self.proj(x)), attention_probs
 
 
 class Block(nn.Module):
@@ -156,6 +136,7 @@ class Block(nn.Module):
     ):
         super().__init__()
         self.norm1 = norm_layer(dim)
+        # Unused by GPS inference but retained for released checkpoint keys.
         self.norm_cross = norm_layer(dim)
         self.norm2 = norm_layer(dim)
 
@@ -180,24 +161,14 @@ class Block(nn.Module):
         )
 
     def forward(self, x, need_attn=False):
-
         shortcut = x
         x, attn = self.attn(self.norm1(x))
         x = shortcut + self.drop_path(x)
-        # attn = None
-        # x = x + self.drop_path(self.attn(self.norm1(x)))
-
         x = x + self.drop_path(self.mlp(self.norm2(x)))
 
         if need_attn:
             return x, attn
-        else:
-            return x
-
-    # def forward(self, x):
-    #     x = x + self.drop_path(self.attn(self.norm1(x)))
-    #     x = x + self.drop_path(self.mlp(self.norm2(x)))
-    #     return x
+        return x
 
 
 class OverlapPatchEmbed(nn.Module):
@@ -275,9 +246,7 @@ class GPSTransReIDVisionTransformer(nn.Module):
         view=0,
         drop_path_rate=0.0,
         norm_layer=nn.LayerNorm,
-        local_feature=False,
         sie_xishu=1.0,
-        cls_token_num=1,
         pruning_layers=(),
         pruning_ratios=(),
         propagation_max_iter=10,
@@ -288,7 +257,6 @@ class GPSTransReIDVisionTransformer(nn.Module):
         self.num_features = self.embed_dim = (
             embed_dim  # num_features for consistency with other models
         )
-        self.local_feature = local_feature
         self.patch_embed = OverlapPatchEmbed(
             img_size=img_size,
             patch_size=patch_size,
@@ -296,15 +264,11 @@ class GPSTransReIDVisionTransformer(nn.Module):
             in_chans=in_chans,
             embed_dim=embed_dim,
         )
-        self.cls_token_num = int(cls_token_num)
-
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # Retained for compatibility with the released GPS checkpoints.
-        self.cls_token2 = nn.Parameter(
-            torch.zeros(1, self.cls_token_num - 1, embed_dim)
-        )
+        self.cls_token2 = nn.Parameter(torch.zeros(1, 0, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
 
         self.cam_num = camera
@@ -399,7 +363,7 @@ class GPSTransReIDVisionTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def token_pruning_graph_partitioning(
+    def _group_tokens(
         self,
         x,  # shape [B, N + 1, d]
         attn,  # shape [B, num_heads, N, N]
@@ -412,12 +376,7 @@ class GPSTransReIDVisionTransformer(nn.Module):
             keep_ratio=keep_ratio,
             original_indices=orig_indices,
         )
-        return (
-            grouped.tokens,
-            grouped.kept_indices,
-            grouped.deleted_indices,
-            grouped.deleted_sequence_indices,
-        )
+        return grouped.tokens, grouped.kept_indices
 
     def forward_features(
         self,
@@ -425,10 +384,8 @@ class GPSTransReIDVisionTransformer(nn.Module):
         camera_id,
         view_id,
         label=None,
-        multi_view=False,
-        dataset_name="train",
+        dataset_name="query",
     ):
-
         B = x.shape[0]
         x = self.patch_embed(x)  # B N C
 
@@ -454,132 +411,88 @@ class GPSTransReIDVisionTransformer(nn.Module):
 
         x = self.pos_drop(x)
 
-        if not multi_view:
-            split = 8
-            if self.local_feature:
-                for blk in self.blocks[:-1]:
-                    x = blk(x)
-                return x
-            else:
-                for blk in self.blocks:
-                    x = blk(x)
-                x = self.norm(x)
-                return x[:, 0]
-        else:  # multi-view
-            if dataset_name == "train":
-                # for Train and Gallery. not for Query. Because Query(Test) is already paired.
-                viewpoint_num = 3
-                lsort = torch.argsort(label)
-                lsort = lsort.reshape((-1, viewpoint_num))
-                assert torch.all(label[lsort[:, 0]] == label[lsort[:, 1]])
-                assert torch.all(label[lsort[:, 1]] == label[lsort[:, 2]])
-                pruning_ratios = self.background_pruning_ratios
+        if dataset_name == "query":
+            viewpoint_num = 3
+            lsort = torch.arange(x.size(0)).reshape((-1, viewpoint_num))
+            if not (
+                torch.all(label[lsort[:, 0]] == label[lsort[:, 1]])
+                and torch.all(label[lsort[:, 1]] == label[lsort[:, 2]])
+            ):
+                raise ValueError("each GPS query group must contain one identity")
+            pruning_ratios = self.background_pruning_ratios
+        elif dataset_name == "gallery":
+            viewpoint_num = 1
+            lsort = torch.arange(x.size(0)).reshape((-1, viewpoint_num))
+            pruning_ratios = (0.0,) * len(self.background_pruning_ratios)
+        else:
+            raise ValueError(f"unsupported GPS dataset split: {dataset_name!r}")
 
-            elif dataset_name == "query" or dataset_name == "test":
-                viewpoint_num = 3
-                lsort = torch.arange(x.size(0)).reshape((-1, viewpoint_num))
-                assert torch.all(label[lsort[:, 0]] == label[lsort[:, 1]])
-                assert torch.all(label[lsort[:, 1]] == label[lsort[:, 2]])
-                pruning_ratios = self.background_pruning_ratios
+        split = 8
+        attn_views = [None for _ in range(viewpoint_num)]
+        x_views = [x[lsort[:, view]] for view in range(viewpoint_num)]
+        num_patches = self.patch_embed.num_patches
+        batch_size_per_group = x_views[0].size(0)
+        orig_indices_per_view = [
+            torch.arange(
+                view_index * num_patches,
+                (view_index + 1) * num_patches,
+                device=x.device,
+            )
+            .unsqueeze(0)
+            .repeat(batch_size_per_group, 1)
+            for view_index in range(viewpoint_num)
+        ]
 
-            elif dataset_name == "gallery":
-                viewpoint_num = 1
-                lsort = torch.arange(x.size(0)).reshape((-1, viewpoint_num))
-                # Single-view does not need pruning
-                pruning_ratios = (0.0,) * len(self.background_pruning_ratios)
-            else:
-                raise ValueError(f"unsupported GPS dataset split: {dataset_name!r}")
+        pruning_index = 0
+        for i, blk in enumerate(self.blocks[:-1]):
+            if i == split:
+                cls_token_fused = (
+                    sum(view_tokens[:, 0:1] for view_tokens in x_views) / viewpoint_num
+                )
+                patch_tokens_all = torch.cat(
+                    [view_tokens[:, 1:] for view_tokens in x_views],
+                    dim=1,
+                )
+                x_fused = torch.cat([cls_token_fused, patch_tokens_all], dim=1)
+                orig_indices_fused = torch.cat(orig_indices_per_view, dim=1)
 
-            split = 8
-            if self.local_feature:
-                attn_views = [None for _ in range(viewpoint_num)]
-                x_views = []
-                for v in range(viewpoint_num):
-                    x_views.append(x[lsort[:, v]])
-
-                num_patches = self.patch_embed.num_patches
-                batch_size_per_group = x_views[0].size(0)
-                orig_indices_per_view = [
-                    torch.arange(
-                        view_index * num_patches,
-                        (view_index + 1) * num_patches,
-                        device=x.device,
+            if i < split:
+                for view in range(viewpoint_num):
+                    x_views[view], attn_views[view] = blk(
+                        x_views[view],
+                        need_attn=True,
                     )
-                    .unsqueeze(0)
-                    .repeat(batch_size_per_group, 1)
-                    for view_index in range(viewpoint_num)
-                ]
-
-                pruning_index = 0
-                for i, blk in enumerate(self.blocks[:-1]):
-                    if i == split:
-                        cls_token_fused = (
-                            sum(view_tokens[:, 0:1] for view_tokens in x_views)
-                            / viewpoint_num
-                        )
-                        patch_tokens_all = torch.cat(
-                            [view_tokens[:, 1:] for view_tokens in x_views],
-                            dim=1,
-                        )
-                        x_fused = torch.cat(
-                            [cls_token_fused, patch_tokens_all],
-                            dim=1,
-                        )
-                        orig_indices_fused = torch.cat(
-                            orig_indices_per_view,
-                            dim=1,
-                        )
-
-                    if i < split:
-                        for v in range(viewpoint_num):
-                            x_views[v], attn_views[v] = blk(
-                                x_views[v],
-                                need_attn=True,
-                            )
-                    else:
-                        x_fused, attn_fused = blk(x_fused, need_attn=True)
-
-                    if i in self.background_pruning_layers:
-                        keep_ratio = 1.0 - pruning_ratios[pruning_index]
-                        pruning_index += 1
-
-                        if i < split:
-                            for v in range(viewpoint_num):
-                                x_views[v], orig_indices_per_view[v], _, _ = (
-                                    self.token_pruning_graph_partitioning(
-                                        x=x_views[v],
-                                        attn=attn_views[v],
-                                        keep_ratio=keep_ratio,
-                                        orig_indices=orig_indices_per_view[v],
-                                    )
-                                )
-                        else:
-                            x_fused, orig_indices_fused, _, _ = (
-                                self.token_pruning_graph_partitioning(
-                                    x=x_fused,
-                                    attn=attn_fused,
-                                    keep_ratio=keep_ratio,
-                                    orig_indices=orig_indices_fused,
-                                )
-                            )
-
-                original_token_count = viewpoint_num * num_patches
-                selection_indices = orig_indices_fused
-
-                return (
-                    x_fused,
-                    lsort[:, 0],
-                    0.0,
-                    {
-                        "indices": selection_indices,
-                        "token_count": original_token_count,
-                    },
-                )
-
             else:
-                raise NotImplementedError(
-                    "Multi-view inference requires MODEL.JPM=True/local_feature=True."
-                )
+                x_fused, attn_fused = blk(x_fused, need_attn=True)
+
+            if i in self.background_pruning_layers:
+                keep_ratio = 1.0 - pruning_ratios[pruning_index]
+                pruning_index += 1
+                if i < split:
+                    for view in range(viewpoint_num):
+                        x_views[view], orig_indices_per_view[view] = self._group_tokens(
+                            x=x_views[view],
+                            attn=attn_views[view],
+                            keep_ratio=keep_ratio,
+                            orig_indices=orig_indices_per_view[view],
+                        )
+                else:
+                    x_fused, orig_indices_fused = self._group_tokens(
+                        x=x_fused,
+                        attn=attn_fused,
+                        keep_ratio=keep_ratio,
+                        orig_indices=orig_indices_fused,
+                    )
+
+        return (
+            x_fused,
+            lsort[:, 0],
+            0.0,
+            {
+                "indices": orig_indices_fused,
+                "token_count": viewpoint_num * num_patches,
+            },
+        )
 
     def forward(
         self,
@@ -587,15 +500,13 @@ class GPSTransReIDVisionTransformer(nn.Module):
         cam_label=None,
         view_label=None,
         label=None,
-        multi_view=False,
-        dataset_name="train",
+        dataset_name="query",
     ):
         x = self.forward_features(
             x,
             cam_label,
             view_label,
             label=label,
-            multi_view=multi_view,
             dataset_name=dataset_name,
         )
         return x
@@ -609,7 +520,6 @@ def build_gps_transreid_vit(
     drop_path_rate=0.1,
     camera=0,
     view=0,
-    local_feature=False,
     sie_xishu=1.5,
     **kwargs,
 ):
@@ -630,7 +540,6 @@ def build_gps_transreid_vit(
         attn_drop_rate=attn_drop_rate,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
         sie_xishu=sie_xishu,
-        local_feature=local_feature,
         **kwargs,
     )
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 from pathlib import Path
 
@@ -24,35 +23,9 @@ def fmt_percent(value: float) -> str:
     return f"{100.0 * value:.3f}%"
 
 
-def fmt_ms(seconds: float) -> str:
-    return f"{1000.0 * seconds:.3f}"
-
-
 DISPLAY_NAMES = {"VeRi": "VeRi-776", "MuRI": "MuRI"}
 DISPLAY_ORDER = ("VeRi", "MuRI")
 DISPLAY_RHOS = (0.1, 0.3, 0.5, 0.7, 0.9)
-
-
-def load_task_curve(dataset_root: Path) -> dict[float, dict[str, float]]:
-    """Load optional per-rho task metrics without requiring them for proxy runs."""
-    candidates = (
-        dataset_root / "task_rate_curve.csv",
-        dataset_root / "task_results.csv",
-        dataset_root / "rate_curve.csv",
-    )
-    path = next((candidate for candidate in candidates if candidate.is_file()), None)
-    if path is None:
-        return {}
-    curve = {}
-    with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            rho = float(row["rho"])
-            curve[rho] = {
-                key: float(row[key])
-                for key in ("mAP", "rank1")
-                if row.get(key, "") != ""
-            }
-    return curve
 
 
 def available_datasets(root: Path) -> list[str]:
@@ -76,7 +49,6 @@ def print_m2405_results(root: Path, datasets: list[str]) -> None:
 def print_rate_table(root: Path, dataset: str) -> None:
     dataset_root = root / dataset
     result = load_json(dataset_root / "result.json")
-    task_curve = load_task_curve(dataset_root)
     rows = load_json(dataset_root / "token_grouping.json")
     by_rho = {round(float(row["rho"]), 1): row for row in rows}
 
@@ -89,29 +61,12 @@ def print_rate_table(root: Path, dataset: str) -> None:
         row = by_rho.get(round(rho, 1))
         if row is None:
             continue
-        task = task_curve.get(round(rho, 1), {})
-        map_value = (
-            f"{float(row['mAP']):.3f}"
-            if "mAP" in row
-            else fmt_percent(task["mAP"])
-            if "mAP" in task
-            else "--"
-        )
-        rank1_value = (
-            f"{float(row['R1']):.3f}"
-            if "R1" in row
-            else fmt_percent(task["rank1"])
-            if "rank1" in task
-            else "--"
-        )
-        kept_count = float(row.get("kept_count_mean", row.get("kept_tokens")))
-        keep_ratio = float(row.get("keep_ratio_mean", row.get("keep_ratio")))
-        total_bpfp = float(row.get("bpfp_total_mean", row.get("total_bpfp")))
-        saving = float(row.get("rate_saving_mean", row.get("rate_saving")))
         print(
-            f"{rho:>3.1f} {kept_count:>7.0f} {keep_ratio:>8.3f} "
-            f"{total_bpfp:>12.3f} {fmt_percent(saving):>10} "
-            f"{map_value:>9} {rank1_value:>9}"
+            f"{rho:>3.1f} {float(row['kept_count_mean']):>7.0f} "
+            f"{float(row['keep_ratio_mean']):>8.3f} "
+            f"{float(row['bpfp_total_mean']):>12.3f} "
+            f"{fmt_percent(float(row['rate_saving_mean'])):>10} "
+            f"{float(row['mAP']):>9.3f} {float(row['R1']):>9.3f}"
         )
     print(
         f"dense checkpoint: mAP {fmt_percent(result['mAP'])}, Rank-1 {fmt_percent(result['rank1'])}"

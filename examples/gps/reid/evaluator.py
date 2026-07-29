@@ -33,13 +33,17 @@ def evaluate_model(
     gallery_loader,
     num_query,
     *,
-    real_codec=False,
     on_query_coded_unit=None,
 ):
     """Run multi-view retrieval and return task quality plus coded query rate."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval().to(device)
-    evaluator = R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
+    evaluator = R1_mAP_eval(
+        num_query,
+        max_rank=50,
+        feat_norm=bool(cfg.evaluation.feature_normalize),
+        reranking=bool(cfg.evaluation.reranking),
+    )
     evaluator.reset()
     rate_bits: dict[str, float] = {}
     coded_groups = 0
@@ -64,20 +68,10 @@ def evaluate_model(
                         non_blocking=True,
                     ),
                     "label": torch.as_tensor(pid, dtype=torch.long, device=device),
-                    "multi_view": True,
-                    "flip_view": False,
-                    "extra_token": False,
                     "dataset_name": dataset_name,
                 }
-                if real_codec:
-                    coded = model.compress(img, tasks=["reid"], **model_kwargs)
-                    task_outputs = model.decompress(coded, tasks=["reid"])
-                else:
-                    coded, task_outputs = model.forward_test(
-                        img,
-                        tasks=["reid"],
-                        **model_kwargs,
-                    )
+                coded = model.compress(img, tasks=["reid"], **model_kwargs)
+                task_outputs = model.decompress(coded, tasks=["reid"])
                 feature = task_outputs["reid"]
                 if dataset_name == "query":
                     for name, value in bits_from_coded_unit(coded).items():

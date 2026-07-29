@@ -17,11 +17,9 @@ class GPSTransReIDHead(nn.Module):
         local_bottlenecks: list[nn.Module],
         *,
         neck_feature: str,
-        cls_token_num: int,
     ):
         super().__init__()
         self.neck_feature = str(neck_feature)
-        self.cls_token_num = int(cls_token_num)
         self.bottleneck = bottleneck
         self.local_bottlenecks = nn.ModuleList(local_bottlenecks)
         if len(self.local_bottlenecks) != 4:
@@ -55,10 +53,8 @@ class GPSTransReIDHead(nn.Module):
         if self.neck_feature == "after":
             parts = [global_bn, *(feature / 4 for feature in local_bn)]
         else:
-            batch_size = features.global_feature.shape[0]
             local_features = [
-                tokens[:, : self.cls_token_num].reshape(batch_size, -1) / 4
-                for tokens in features.local_token_features
+                tokens[:, 0] / 4 for tokens in features.local_token_features
             ]
             parts = [features.global_feature, *local_features]
         return torch.cat(parts, dim=1)

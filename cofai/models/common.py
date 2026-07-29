@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from compressai.models.base import CompressionModel
 
+from cofai.engine.bitrate import bits_from_coded_unit
 from cofai.engine.registry import instantiate_class, register
 
 
@@ -29,22 +30,6 @@ def _merge_unique(target: dict, source: dict, *, kind: str) -> None:
     if duplicate:
         raise KeyError(f"duplicate {kind} keys: {sorted(duplicate)!r}")
     target.update(source)
-
-
-def _bits_from_strings(strings: dict[str, list[list[bytes]]]) -> dict[str, float]:
-    bits: dict[str, float] = {}
-    for name, rows in strings.items():
-        total = 0
-        for row in rows:
-            if not isinstance(row, list) or len(row) != 1:
-                raise ValueError(
-                    f"stream {name!r} must use canonical list[list[bytes]] rows"
-                )
-            if not isinstance(row[0], bytes):
-                raise TypeError(f"stream {name!r} payloads must be bytes")
-            total += len(row[0]) * 8
-        bits[str(name)] = float(total)
-    return bits
 
 
 @register("CommonFeatureCodecModel")
@@ -73,7 +58,6 @@ class CommonFeatureCodecModel(CompressionModel):
         index_codecs: dict | None = None,
         heads: dict | None = None,
         post_process=None,
-        **kwargs,
     ):
         super().__init__()
         if post_process is not None:
@@ -219,7 +203,7 @@ class CommonFeatureCodecModel(CompressionModel):
             raise KeyError("codec.forward must return `h_hat`")
 
         index_streams = self._encode_index_sets(encoded)
-        auxiliary_bits = _bits_from_strings(index_streams)
+        auxiliary_bits = bits_from_coded_unit({"strings": index_streams})
         if "bits" in codec_out:
             bits = {
                 str(name): float(value)
@@ -256,8 +240,6 @@ class CommonFeatureCodecModel(CompressionModel):
         strings = dict(coded_unit.get("strings") or {})
         codec_stream_keys = tuple(strings)
         _merge_unique(strings, self._encode_index_sets(encoded), kind="stream")
-        # Validate the exact shape consumed by the unmodified eval bit counter.
-        _bits_from_strings(strings)
 
         pstate = dict(coded_unit.get("pstate") or {})
         codec_pstate_keys = tuple(pstate)

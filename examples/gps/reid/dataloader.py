@@ -45,43 +45,47 @@ def val_collate_fn(batch):
 
 def make_dataloader(cfg) -> GPSDataLoaders:
     """Build only the multi-view query and gallery loaders used by evaluation."""
+    model_cfg = cfg.model
+    evaluation_cfg = cfg.evaluation
+    dataset_name = str(cfg.dataset.name)
     val_transforms = T.Compose(
         [
-            T.Resize(cfg.INPUT.SIZE_TEST),
+            T.Resize(model_cfg.image_size),
             T.ToTensor(),
-            T.Normalize(mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD),
+            T.Normalize(mean=model_cfg.pixel_mean, std=model_cfg.pixel_std),
         ]
     )
     try:
-        dataset_factory = _DATASET_FACTORIES[cfg.DATASETS.NAMES]
+        dataset_factory = _DATASET_FACTORIES[dataset_name]
     except KeyError as exc:
         choices = ", ".join(sorted(_DATASET_FACTORIES))
         raise ValueError(
-            f"Unsupported GPS dataset {cfg.DATASETS.NAMES!r}; "
-            f"expected one of: {choices}"
+            f"Unsupported GPS dataset {dataset_name!r}; expected one of: {choices}"
         ) from exc
-    dataset = dataset_factory(root=cfg.DATASETS.ROOT_DIR)
+    dataset = dataset_factory(root=cfg.data_root)
 
-    query_sampler = MultiViewSampler(dataset.query, cfg.TEST.IMS_PER_BATCH, 3)
+    batch_size = int(evaluation_cfg.batch_size)
+    workers = int(evaluation_cfg.workers)
+    query_sampler = MultiViewSampler(dataset.query, batch_size, 3)
     query_loader = DataLoader(
         ImageDataset(dataset.query, val_transforms),
-        batch_size=cfg.TEST.IMS_PER_BATCH,
+        batch_size=batch_size,
         sampler=query_sampler,
         shuffle=False,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
+        num_workers=workers,
         collate_fn=val_collate_fn,
     )
     gallery_loader = DataLoader(
         ImageDataset(dataset.gallery, val_transforms),
-        batch_size=cfg.TEST.IMS_PER_BATCH,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
+        num_workers=workers,
         collate_fn=val_collate_fn,
     )
 
     camera_num = dataset.num_train_cams
     view_num = dataset.num_train_vids
-    if cfg.DATASETS.NAMES == "muri":
+    if dataset_name == "muri":
         camera_num = 0
         view_num = 0
     return GPSDataLoaders(

@@ -14,7 +14,6 @@ from examples.gps.config import load_config
 from examples.gps.model import build_codec_model
 from examples.gps.reid.dataloader import make_dataloader
 from examples.gps.reid.evaluator import evaluate_model
-from examples.gps.reid.legacy_config import build_legacy_config
 from examples.gps.token_grouping_eval.model_probe import (
     ProbeRecord,
     install_token_grouping_probe,
@@ -77,6 +76,7 @@ def benchmark_selection_map(
 
 def summarize_run(
     records: list[ProbeRecord],
+    feature_streams: list[bytes],
     selection_streams: list[bytes | None],
     task: dict,
     tg,
@@ -84,42 +84,36 @@ def summarize_run(
 ) -> dict:
     if not records:
         raise RuntimeError("the model probe did not collect any query token maps")
-    if len(selection_streams) != len(records):
+    if len(feature_streams) != len(records) or len(selection_streams) != len(records):
         raise RuntimeError(
-            "transmitted selection maps and probe records have different lengths"
+            "transmitted streams and probe records have different lengths"
         )
 
-    feature_dim = int(tg.feature_dimension)
     actual_bits = dict(task.get("bits") or {})
     actual_feature_bits = actual_bits.get("feature")
     if actual_feature_bits is None:
         raise RuntimeError("real codec result is missing the `feature` stream")
-    feature_values = sum(
-        (len(record.kept_indices) + 1) * feature_dim for record in records
-    )
-    if feature_values <= 0 or not float(actual_feature_bits).is_integer():
-        raise RuntimeError("raw feature stream must contain an integer bit count")
-    feature_bits_total = int(actual_feature_bits)
-    bit_depth, remainder = divmod(feature_bits_total, feature_values)
-    if remainder:
-        raise RuntimeError(
-            "raw feature stream does not have a constant integer bit depth"
-        )
 
     bitrate_rows = []
-    for record, selection_stream in zip(records, selection_streams, strict=True):
+    for record, feature_stream, selection_stream in zip(
+        records,
+        feature_streams,
+        selection_streams,
+        strict=True,
+    ):
         kept_count = len(record.kept_indices)
+        feature_bits = len(feature_stream) * 8
         map_bits = 0 if selection_stream is None else len(selection_stream) * 8
-        # The transmitted compact tensor contains one CLS token in addition to
-        # every retained patch token.
-        feature_bits = (kept_count + 1) * feature_dim * bit_depth
+        bits_per_token, remainder = divmod(feature_bits, kept_count + 1)
+        if remainder:
+            raise RuntimeError("feature stream does not contain whole token rows")
         bitrate_rows.append(
             bitrate_record(
                 token_count=record.n_tokens,
                 kept_tokens=kept_count,
                 feature_bits=feature_bits,
                 map_bits=map_bits,
-                dense_feature_bits=(record.n_tokens + 1) * feature_dim * bit_depth,
+                dense_feature_bits=(record.n_tokens + 1) * bits_per_token,
             )
         )
 
@@ -163,7 +157,6 @@ def summarize_run(
         "R10": 100.0 * float(task["rank10"]),
         "num_groups": len(records),
         "n_tokens": records[0].n_tokens,
-        "feature_bit_depth": bit_depth,
         "kept_count_mean": mean(row["kept_tokens"] for row in bitrate_rows),
         "keep_ratio_mean": mean(row["keep_ratio"] for row in bitrate_rows),
         "bpfp_feat_mean": mean(row["feature_bpfp"] for row in bitrate_rows),
@@ -189,8 +182,7 @@ def main() -> None:
             raise ValueError("GPS eval batch size must be a positive multiple of 3")
         cfg.evaluation.batch_size = args.batch_size
 
-    base_legacy_cfg = build_legacy_config(cfg)
-    loaders = make_dataloader(base_legacy_cfg)
+    loaders = make_dataloader(cfg)
     rhos = (
         args.rho
         if args.rho is not None
@@ -205,39 +197,44 @@ def main() -> None:
         if not 0.0 <= rho < 1.0:
             raise ValueError(f"rho must be in [0, 1), got {rho}")
         cfg.model.pruning_ratios = [float(rho)] * len(cfg.model.pruning_layers)
-        legacy_cfg = build_legacy_config(cfg)
         model = build_codec_model(
             cfg,
-            legacy_cfg,
             camera_num=loaders.camera_num,
             view_num=loaders.view_num,
         )
         probe = install_token_grouping_probe(model)
+        feature_streams: list[bytes] = []
         selection_streams: list[bytes | None] = []
 
-        def collect_selection_streams(coded_unit, group_count: int) -> None:
-            rows = coded_unit["strings"].get("selection_map")
-            if rows is None:
+        def collect_query_streams(coded_unit, group_count: int) -> None:
+            strings = coded_unit["strings"]
+            feature_rows = strings["feature"]
+            if len(feature_rows) != group_count:
+                raise RuntimeError("feature stream batch does not match grouped output")
+            feature_streams.extend(row[0] for row in feature_rows)
+
+            selection_rows = strings.get("selection_map")
+            if selection_rows is None:
                 selection_streams.extend([None] * group_count)
                 return
-            if len(rows) != group_count:
+            if len(selection_rows) != group_count:
                 raise RuntimeError(
                     "selection-map stream batch does not match grouped features"
                 )
-            selection_streams.extend(row[0] for row in rows)
+            selection_streams.extend(row[0] for row in selection_rows)
 
         print(f"\nEvaluating {cfg.name} at rho={rho:.1f}")
         task = evaluate_model(
-            legacy_cfg,
+            cfg,
             model,
             loaders.query,
             loaders.gallery,
             loaders.num_query,
-            real_codec=True,
-            on_query_coded_unit=collect_selection_streams,
+            on_query_coded_unit=collect_query_streams,
         )
         row = summarize_run(
             probe.records,
+            feature_streams,
             selection_streams,
             task,
             cfg.token_grouping,

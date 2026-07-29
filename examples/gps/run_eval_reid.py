@@ -10,7 +10,6 @@ from examples.gps.config import load_config
 from examples.gps.model import build_codec_model
 from examples.gps.reid.dataloader import make_dataloader
 from examples.gps.reid.evaluator import evaluate_model
-from examples.gps.reid.legacy_config import build_legacy_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -37,11 +36,9 @@ def main() -> None:
             raise ValueError("GPS eval batch size must be a positive multiple of 3")
         cfg.evaluation.batch_size = args.batch_size
 
-    legacy_cfg = build_legacy_config(cfg)
-    loaders = make_dataloader(legacy_cfg)
+    loaders = make_dataloader(cfg)
     model = build_codec_model(
         cfg,
-        legacy_cfg,
         camera_num=loaders.camera_num,
         view_num=loaders.view_num,
     )
@@ -49,12 +46,11 @@ def main() -> None:
         "dataset": str(cfg.name),
         "checkpoint": str(cfg.checkpoint),
         **evaluate_model(
-            legacy_cfg,
+            cfg,
             model,
             loaders.query,
             loaders.gallery,
             loaders.num_query,
-            real_codec=True,
         ),
     }
     output = args.output or (

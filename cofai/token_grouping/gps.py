@@ -17,9 +17,6 @@ class TokenGroupingResult:
 
     tokens: torch.Tensor
     kept_indices: torch.Tensor
-    deleted_indices: torch.Tensor
-    deleted_sequence_indices: torch.Tensor
-    keep_mask: torch.Tensor
 
 
 class GPSTokenGrouper:
@@ -80,15 +77,9 @@ class GPSTokenGrouper:
 
         keep_count = max(int(patch_count * keep_ratio), 1)
         if keep_count == patch_count:
-            empty = torch.empty(batch, 0, dtype=torch.long, device=tokens.device)
             return TokenGroupingResult(
                 tokens=tokens,
                 kept_indices=original_indices,
-                deleted_indices=empty,
-                deleted_sequence_indices=empty,
-                keep_mask=torch.ones(
-                    batch, patch_count, dtype=torch.bool, device=tokens.device
-                ),
             )
 
         affinity = attention.mean(dim=1)
@@ -119,21 +110,8 @@ class GPSTokenGrouper:
             tokens[:, 1:], 1, top_indices.unsqueeze(-1).expand(-1, -1, tokens.shape[-1])
         )
         compact_tokens = torch.cat([tokens[:, :1], compact_tokens], dim=1)
-        keep_mask = torch.zeros(
-            batch, patch_count, dtype=torch.bool, device=tokens.device
-        )
-        keep_mask.scatter_(1, top_indices, True)
-        deleted_sequence_indices = (
-            (~keep_mask)
-            .nonzero(as_tuple=False)
-            .reshape(batch, patch_count - keep_count, 2)[..., 1]
-        )
         kept_indices = torch.gather(original_indices, 1, top_indices)
-        deleted_indices = torch.gather(original_indices, 1, deleted_sequence_indices)
         return TokenGroupingResult(
             tokens=compact_tokens,
             kept_indices=kept_indices,
-            deleted_indices=deleted_indices,
-            deleted_sequence_indices=deleted_sequence_indices,
-            keep_mask=keep_mask,
         )

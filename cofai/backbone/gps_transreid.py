@@ -52,26 +52,11 @@ class GPSTransReIDBackbone(nn.Module):
         encoder: nn.Module,
         global_decoder: nn.Module,
         local_decoder: nn.Module,
-        *,
-        cls_token_num: int,
-        shuffle_groups: int,
-        shift_num: int,
-        divide_length: int,
-        rearrange: bool,
     ):
         super().__init__()
         self.encoder = encoder
         self.global_decoder = global_decoder
         self.local_decoder = local_decoder
-        self.cls_token_num = int(cls_token_num)
-        self.shuffle_groups = int(shuffle_groups)
-        self.shift_num = int(shift_num)
-        self.divide_length = int(divide_length)
-        self.rearrange = bool(rearrange)
-        if self.divide_length != 4:
-            raise ValueError(
-                "the released GPS TransReID head requires exactly four JPM branches"
-            )
 
     @property
     def patches_per_view(self) -> int:
@@ -93,25 +78,14 @@ class GPSTransReIDBackbone(nn.Module):
         label=None,
         cam_label=None,
         view_label=None,
-        multi_view=False,
-        flip_view=False,
-        extra_token=False,
-        dataset_name="train",
+        dataset_name="query",
         **kwargs,
     ):
-        if not multi_view:
-            raise ValueError("GPSTransReIDBackbone requires multi_view=True")
-        if flip_view or extra_token:
-            raise ValueError(
-                "the released GPS checkpoint does not implement flip_view or "
-                "extra_token inference"
-            )
         h, _order, _flops, selection = self.encoder(
             x,
             cam_label=cam_label,
             view_label=view_label,
             label=label,
-            multi_view=True,
             dataset_name=dataset_name,
         )
         indices = selection["indices"]
@@ -134,44 +108,17 @@ class GPSTransReIDBackbone(nn.Module):
         return {
             "h": h,
             "index_sets": index_sets,
-            "pstate": {
-                "extra_token": bool(extra_token),
-                "original_patch_tokens": token_count,
-                "retained_patch_tokens": int(indices.shape[1]),
-                "feature_dimension": int(h.shape[-1]),
-            },
         }
 
-    def decode(self, h, *, pstate, tasks, **kwargs):
+    def decode(self, h, *, tasks, **kwargs):
         if "reid" not in tasks:
             return {}
 
-        batch_size = h.shape[0]
         global_tokens = self.global_decoder(h)
-        extra_token = bool(pstate.get("extra_token", False))
-        if extra_token:
-            global_feature = global_tokens[:, : self.cls_token_num].reshape(
-                batch_size,
-                -1,
-            )
-            cls_token_num = self.cls_token_num
-            bottleneck_global_feature = global_tokens[:, 0]
-        else:
-            global_feature = global_tokens[:, 0]
-            cls_token_num = 1
-            bottleneck_global_feature = global_feature
-
-        patch_length = (h.size(1) - cls_token_num) // self.divide_length
-        cls_tokens = h[:, :cls_token_num]
-        if self.rearrange:
-            patch_tokens = shuffle_unit(
-                h,
-                self.shift_num,
-                self.shuffle_groups,
-                cls_token_num,
-            )
-        else:
-            patch_tokens = h[:, cls_token_num:]
+        global_feature = global_tokens[:, 0]
+        patch_length = (h.size(1) - 1) // 4
+        cls_tokens = h[:, :1]
+        patch_tokens = shuffle_unit(h, shift=8, group=2)
 
         local_token_features = []
         for index in range(4):
@@ -184,7 +131,7 @@ class GPSTransReIDBackbone(nn.Module):
         return {
             "reid": GPSTransReIDFeatures(
                 global_feature=global_feature,
-                bottleneck_global_feature=bottleneck_global_feature,
+                bottleneck_global_feature=global_feature,
                 local_token_features=tuple(local_token_features),
             ),
         }

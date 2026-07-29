@@ -94,7 +94,6 @@ def test_summary_counts_complete_map_stream(feature_bit_depth):
         preprocess_ms=0.1,
     )
     grouping_config = SimpleNamespace(
-        feature_dimension=8,
         timing_repeats=1,
         warmup=0,
     )
@@ -103,6 +102,7 @@ def test_summary_counts_complete_map_stream(feature_bit_depth):
 
     summary = summarize_run(
         [record],
+        [bytes(feature_bits // 8)],
         [encoded.to_bytes()],
         {
             "mAP": 0.5,
@@ -121,7 +121,6 @@ def test_summary_counts_complete_map_stream(feature_bit_depth):
 
     assert summary["bpfp_map_mean"] == encoded.stream_bits / record.n_tokens
     assert summary["bpfp_feat_mean"] == feature_bits / record.n_tokens
-    assert summary["feature_bit_depth"] == feature_bit_depth
     assert summary["map_recovery_accuracy"] == 1.0
 
 
@@ -167,31 +166,23 @@ def test_gps_backbone_emits_raw_index_set_and_keeps_cls():
         DummyBase(),
         torch.nn.Identity(),
         torch.nn.Identity(),
-        cls_token_num=1,
-        shuffle_groups=2,
-        shift_num=1,
-        divide_length=4,
-        rearrange=False,
     )
     head = GPSTransReIDHead(
         torch.nn.Identity(),
         [torch.nn.Identity() for _ in range(4)],
         neck_feature="before",
-        cls_token_num=1,
     ).eval()
     encoded = backbone.encode(
         torch.zeros(2, 3, 4, 4),
         label=torch.arange(2),
-        multi_view=True,
     )
 
-    assert encoded["h"].shape[1] == encoded["pstate"]["retained_patch_tokens"] + 1
+    assert encoded["h"].shape[1] == 3
     assert set(encoded["index_sets"]) == {"selection_map"}
     rows = SELECTION_MAP_CODEC.encode_batch(encoded["index_sets"]["selection_map"])
     assert all(SELECTION_MAP_CODEC.decode(row[0]) in ([0, 2], [1, 3]) for row in rows)
     decoded = backbone.decode(
         encoded["h"],
-        pstate=encoded["pstate"],
         tasks=["reid"],
     )
     embedding = head(decoded["reid"])

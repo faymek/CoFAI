@@ -6,98 +6,46 @@ import torch.nn as nn
 from cofai.backbone.gps_transreid_vit import build_gps_transreid_vit
 
 
-def weights_init_kaiming(m):
-    classname = m.__class__.__name__
-    if classname.find("Linear") != -1:
-        nn.init.kaiming_normal_(m.weight, a=0, mode="fan_out")
-        nn.init.constant_(m.bias, 0.0)
-
-    elif classname.find("Conv") != -1:
-        nn.init.kaiming_normal_(m.weight, a=0, mode="fan_in")
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0.0)
-    elif classname.find("BatchNorm") != -1:
-        if m.affine:
-            nn.init.constant_(m.weight, 1.0)
-            nn.init.constant_(m.bias, 0.0)
+def _make_bottleneck() -> nn.BatchNorm1d:
+    bottleneck = nn.BatchNorm1d(768)
+    bottleneck.bias.requires_grad_(False)
+    return bottleneck
 
 
-class GPSCheckpointAdapter(nn.Module):
+class _GPSCheckpointAdapter(nn.Module):
     """Construct and load only the released modules needed for evaluation."""
 
-    def __init__(self, camera_num, view_num, cfg, rearrange):
+    def __init__(self, cfg, camera_num, view_num):
         super().__init__()
-        model_path = cfg.MODEL.PRETRAIN_PATH
-        pretrain_choice = cfg.MODEL.PRETRAIN_CHOICE
-        self.neck_feat = cfg.TEST.NECK_FEAT
-        self.in_planes = 768
-        self.cls_token_num = cfg.cls_token_num
-
-        print(
-            "using Transformer_type: {} as a backbone".format(
-                cfg.MODEL.TRANSFORMER_TYPE
-            )
-        )
-
-        if cfg.MODEL.SIE_CAMERA:
-            camera_num = camera_num
-        else:
-            camera_num = 0
-
-        if cfg.MODEL.SIE_VIEW:
-            view_num = view_num
-        else:
-            view_num = 0
+        model_cfg = cfg.model
+        camera_num = camera_num if model_cfg.sie_camera else 0
+        view_num = view_num if model_cfg.sie_view else 0
 
         self.base = build_gps_transreid_vit(
-            img_size=cfg.INPUT.SIZE_TRAIN,
-            sie_xishu=cfg.MODEL.SIE_COE,
-            local_feature=cfg.MODEL.JPM,
+            img_size=model_cfg.image_size,
+            sie_xishu=model_cfg.sie_coefficient,
             camera=camera_num,
             view=view_num,
-            stride_size=cfg.MODEL.STRIDE_SIZE,
-            drop_path_rate=cfg.MODEL.DROP_PATH,
-            cls_token_num=cfg.cls_token_num,
-            pruning_layers=cfg.MODEL.BACKGROUND_PRUNING_LAYERS,
-            pruning_ratios=cfg.MODEL.BACKGROUND_PRUNING_RATIOS,
-            propagation_max_iter=cfg.MODEL.PROPAGATION_MAX_ITER,
-            beta=cfg.MODEL.BETA,
+            stride_size=model_cfg.stride_size,
+            drop_path_rate=model_cfg.drop_path,
+            drop_rate=model_cfg.dropout,
+            attn_drop_rate=model_cfg.attention_dropout,
+            pruning_layers=model_cfg.pruning_layers,
+            pruning_ratios=model_cfg.pruning_ratios,
+            propagation_max_iter=model_cfg.propagation_max_iter,
+            beta=model_cfg.beta,
         )
-
-        if pretrain_choice != "none" or model_path:
-            raise ValueError(
-                "GPS evaluation loads the task checkpoint after construction; "
-                "an additional backbone pretrain checkpoint is unsupported"
-            )
 
         block = self.base.blocks[-1]
         layer_norm = self.base.norm
         self.b1 = nn.Sequential(copy.deepcopy(block), copy.deepcopy(layer_norm))
         self.b2 = nn.Sequential(copy.deepcopy(block), copy.deepcopy(layer_norm))
 
-        self.bottleneck = nn.BatchNorm1d(self.in_planes)
-        self.bottleneck.bias.requires_grad_(False)
-        self.bottleneck.apply(weights_init_kaiming)
-        self.bottleneck_1 = nn.BatchNorm1d(self.in_planes)
-        self.bottleneck_1.bias.requires_grad_(False)
-        self.bottleneck_1.apply(weights_init_kaiming)
-        self.bottleneck_2 = nn.BatchNorm1d(self.in_planes)
-        self.bottleneck_2.bias.requires_grad_(False)
-        self.bottleneck_2.apply(weights_init_kaiming)
-        self.bottleneck_3 = nn.BatchNorm1d(self.in_planes)
-        self.bottleneck_3.bias.requires_grad_(False)
-        self.bottleneck_3.apply(weights_init_kaiming)
-        self.bottleneck_4 = nn.BatchNorm1d(self.in_planes)
-        self.bottleneck_4.bias.requires_grad_(False)
-        self.bottleneck_4.apply(weights_init_kaiming)
-
-        self.shuffle_groups = cfg.MODEL.SHUFFLE_GROUP
-        print("using shuffle_groups size:{}".format(self.shuffle_groups))
-        self.shift_num = cfg.MODEL.SHIFT_NUM
-        print("using shift_num size:{}".format(self.shift_num))
-        self.divide_length = cfg.MODEL.DEVIDE_LENGTH
-        print("using divide_length size:{}".format(self.divide_length))
-        self.rearrange = rearrange
+        self.bottleneck = _make_bottleneck()
+        self.bottleneck_1 = _make_bottleneck()
+        self.bottleneck_2 = _make_bottleneck()
+        self.bottleneck_3 = _make_bottleneck()
+        self.bottleneck_4 = _make_bottleneck()
 
     def load_checkpoint(self, trained_path):
         param_dict = torch.load(
@@ -156,20 +104,8 @@ class GPSCheckpointAdapter(nn.Module):
 
 
 def build_checkpoint_modules(cfg, camera_num, view_num):
-    if (
-        cfg.MODEL.NAME != "transformer"
-        or not cfg.MODEL.JPM
-        or cfg.MODEL.TRANSFORMER_TYPE != "vit_base_patch16_224_TransReID_seq"
-    ):
-        raise ValueError(
-            "GPS evaluation requires the JPM-enabled "
-            "vit_base_patch16_224_TransReID_seq model"
-        )
-    model = GPSCheckpointAdapter(
+    return _GPSCheckpointAdapter(
+        cfg,
         camera_num,
         view_num,
-        cfg,
-        rearrange=cfg.MODEL.RE_ARRANGE,
     )
-    print("===========building transformer with JPM module ===========")
-    return model
