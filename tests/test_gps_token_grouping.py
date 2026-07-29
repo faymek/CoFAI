@@ -8,23 +8,26 @@ from cofai.backbone import GPSTransReIDBackbone
 from cofai.heads import GPSTransReIDHead
 from cofai.index_codecs import (
     AdaptiveBitmapIndexCodec,
-    EncodedSelectionMap,
+    EncodedIndexSet,
 )
-from cofai.token_grouping import GraphTokenGrouper
+from cofai.token_grouping import GPSTokenGrouper
 from examples.gps.config import load_config
 from examples.gps.reid.evaluator import _output_order
-from examples.gps.run_eval_token_grouping import summarize_run
+from examples.gps.run_eval_token_grouping import (
+    benchmark_selection_map,
+    summarize_run,
+)
 from examples.gps.token_grouping_eval.model_probe import ProbeRecord
 
 SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
 
 
 def test_selection_indices_round_trip_from_self_contained_stream():
-    encoded = SELECTION_MAP_CODEC.encode([1, 4, 7], token_count=9)
+    encoded = SELECTION_MAP_CODEC.encode([1, 4, 7], universe_size=9)
     stream = encoded.to_bytes()
 
     assert encoded.stream_bits == len(stream) * 8
-    assert EncodedSelectionMap.from_bytes(stream) == encoded
+    assert EncodedIndexSet.from_bytes(stream) == encoded
     assert SELECTION_MAP_CODEC.decode(stream) == [1, 4, 7]
 
 
@@ -36,7 +39,7 @@ def test_selection_indices_round_trip_from_self_contained_stream():
     ],
 )
 def test_selection_indices_choose_smaller_representation(indices, expected_coding):
-    encoded = SELECTION_MAP_CODEC.encode(indices, token_count=16)
+    encoded = SELECTION_MAP_CODEC.encode(indices, universe_size=16)
 
     assert encoded.coding == expected_coding
     assert SELECTION_MAP_CODEC.decode(encoded) == indices
@@ -47,7 +50,7 @@ def test_selection_indices_choose_smaller_representation(indices, expected_codin
     [
         b"",
         b"BAD!" + b"\x00" * 9,
-        SELECTION_MAP_CODEC.encode([1], token_count=9).to_bytes() + b"\x00",
+        SELECTION_MAP_CODEC.encode([1], universe_size=9).to_bytes() + b"\x00",
     ],
 )
 def test_selection_indices_reject_malformed_streams(stream):
@@ -59,7 +62,7 @@ def test_graph_grouping_across_operating_points():
     torch.manual_seed(10)
     tokens = torch.randn(2, 17, 8)
     attention = torch.softmax(torch.randn(2, 4, 17, 17), dim=-1)
-    grouper = GraphTokenGrouper()
+    grouper = GPSTokenGrouper()
 
     for rho in (0.0, 0.5, 0.9):
         grouped = grouper(tokens, attention, keep_ratio=1.0 - rho)
@@ -72,10 +75,10 @@ def test_graph_grouping_across_operating_points():
 
 def test_graph_grouping_rejects_invalid_structural_inputs():
     with pytest.raises(ValueError, match="at least one patch"):
-        GraphTokenGrouper()(torch.randn(1, 1, 8), torch.randn(1, 1, 1, 1), 1.0)
+        GPSTokenGrouper()(torch.randn(1, 1, 8), torch.randn(1, 1, 1, 1), 1.0)
 
     with pytest.raises(ValueError, match="duplicates"):
-        GraphTokenGrouper()(
+        GPSTokenGrouper()(
             torch.randn(1, 3, 8),
             torch.randn(1, 1, 3, 3),
             0.5,
@@ -100,6 +103,7 @@ def test_summary_counts_complete_map_stream(feature_bit_depth):
 
     summary = summarize_run(
         [record],
+        [encoded.to_bytes()],
         {
             "mAP": 0.5,
             "rank1": 0.6,
@@ -121,7 +125,27 @@ def test_summary_counts_complete_map_stream(feature_bit_depth):
     assert summary["map_recovery_accuracy"] == 1.0
 
 
-def test_gps_backbone_emits_flat_map_side_stream_and_keeps_cls():
+def test_map_recovery_checks_the_transmitted_stream_contents():
+    record = ProbeRecord(
+        n_tokens=16,
+        kept_indices=list(range(0, 16, 2)),
+        preprocess_ms=0.1,
+    )
+    wrong_stream = SELECTION_MAP_CODEC.encode(
+        list(range(1, 16, 2)),
+        universe_size=16,
+    ).to_bytes()
+
+    with pytest.raises(RuntimeError, match="round trip failed"):
+        benchmark_selection_map(
+            record,
+            wrong_stream,
+            repeats=1,
+            warmup=0,
+        )
+
+
+def test_gps_backbone_emits_raw_index_set_and_keeps_cls():
     class DummyBase(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -139,27 +163,22 @@ def test_gps_backbone_emits_flat_map_side_stream_and_keeps_cls():
                 },
             )
 
-    class DummyModel(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.base = DummyBase()
-            self.b1 = torch.nn.Identity()
-            self.b2 = torch.nn.Identity()
-            self.bottleneck = torch.nn.Identity()
-            self.bottleneck_1 = torch.nn.Identity()
-            self.bottleneck_2 = torch.nn.Identity()
-            self.bottleneck_3 = torch.nn.Identity()
-            self.bottleneck_4 = torch.nn.Identity()
-            self.cls_token_num = 1
-            self.shuffle_groups = 2
-            self.shift_num = 1
-            self.divide_length = 4
-            self.rearrange = False
-            self.neck_feat = "before"
-
-    legacy_model = DummyModel()
-    backbone = GPSTransReIDBackbone(legacy_model)
-    head = GPSTransReIDHead(legacy_model).eval()
+    backbone = GPSTransReIDBackbone(
+        DummyBase(),
+        torch.nn.Identity(),
+        torch.nn.Identity(),
+        cls_token_num=1,
+        shuffle_groups=2,
+        shift_num=1,
+        divide_length=4,
+        rearrange=False,
+    )
+    head = GPSTransReIDHead(
+        torch.nn.Identity(),
+        [torch.nn.Identity() for _ in range(4)],
+        neck_feature="before",
+        cls_token_num=1,
+    ).eval()
     encoded = backbone.encode(
         torch.zeros(2, 3, 4, 4),
         label=torch.arange(2),
@@ -167,11 +186,9 @@ def test_gps_backbone_emits_flat_map_side_stream_and_keeps_cls():
     )
 
     assert encoded["h"].shape[1] == encoded["pstate"]["retained_patch_tokens"] + 1
-    assert set(encoded["strings"]) == {"selection_map"}
-    assert all(
-        SELECTION_MAP_CODEC.decode(row[0]) in ([0, 2], [1, 3])
-        for row in encoded["strings"]["selection_map"]
-    )
+    assert set(encoded["index_sets"]) == {"selection_map"}
+    rows = SELECTION_MAP_CODEC.encode_batch(encoded["index_sets"]["selection_map"])
+    assert all(SELECTION_MAP_CODEC.decode(row[0]) in ([0, 2], [1, 3]) for row in rows)
     decoded = backbone.decode(
         encoded["h"],
         pstate=encoded["pstate"],

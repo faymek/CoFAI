@@ -34,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--rho", type=float, nargs="+")
+    parser.add_argument("--batch-size", type=int)
     return parser.parse_args()
 
 
@@ -44,17 +45,17 @@ def mean(values) -> float:
 
 def benchmark_selection_map(
     record: ProbeRecord,
+    encoded_stream: bytes | None,
     repeats: int,
     warmup: int,
 ) -> dict[str, float]:
-    encoded_stream = None
     if len(record.kept_indices) == record.n_tokens:
+        if encoded_stream is not None:
+            raise RuntimeError("unpruned features must not transmit a selection map")
         decoded = record.kept_indices
     else:
-        encoded_stream = SELECTION_MAP_CODEC.encode(
-            record.kept_indices,
-            record.n_tokens,
-        ).to_bytes()
+        if encoded_stream is None:
+            raise RuntimeError("pruned features are missing a selection-map stream")
         decoded = SELECTION_MAP_CODEC.decode(encoded_stream)
     if decoded != record.kept_indices:
         raise RuntimeError("selection-map round trip failed")
@@ -74,9 +75,19 @@ def benchmark_selection_map(
     }
 
 
-def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dict:
+def summarize_run(
+    records: list[ProbeRecord],
+    selection_streams: list[bytes | None],
+    task: dict,
+    tg,
+    rho: float,
+) -> dict:
     if not records:
         raise RuntimeError("the model probe did not collect any query token maps")
+    if len(selection_streams) != len(records):
+        raise RuntimeError(
+            "transmitted selection maps and probe records have different lengths"
+        )
 
     feature_dim = int(tg.feature_dimension)
     actual_bits = dict(task.get("bits") or {})
@@ -96,14 +107,9 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
         )
 
     bitrate_rows = []
-    for record in records:
+    for record, selection_stream in zip(records, selection_streams, strict=True):
         kept_count = len(record.kept_indices)
-        if kept_count == record.n_tokens:
-            map_bits = 0
-        else:
-            map_bits = SELECTION_MAP_CODEC.encode(
-                record.kept_indices, record.n_tokens
-            ).stream_bits
+        map_bits = 0 if selection_stream is None else len(selection_stream) * 8
         # The transmitted compact tensor contains one CLS token in addition to
         # every retained patch token.
         feature_bits = (kept_count + 1) * feature_dim * bit_depth
@@ -139,10 +145,15 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
     map_rows = [
         benchmark_selection_map(
             record,
+            selection_stream,
             repeats=int(tg.timing_repeats),
             warmup=int(tg.warmup),
         )
-        for record in records[:256]
+        for record, selection_stream in zip(
+            records[:256],
+            selection_streams[:256],
+            strict=True,
+        )
     ]
     return {
         "rho": float(rho),
@@ -173,6 +184,10 @@ def main() -> None:
         cfg.data_root = str(args.data_root.resolve())
     if args.checkpoint is not None:
         cfg.checkpoint = str(args.checkpoint.resolve())
+    if args.batch_size is not None:
+        if args.batch_size <= 0 or args.batch_size % 3:
+            raise ValueError("GPS eval batch size must be a positive multiple of 3")
+        cfg.evaluation.batch_size = args.batch_size
 
     base_legacy_cfg = build_legacy_config(cfg)
     loaders = make_dataloader(base_legacy_cfg)
@@ -183,7 +198,7 @@ def main() -> None:
     )
     rows = []
     output = args.output or (
-        PROJECT_ROOT / "logs" / "gps" / str(cfg.dataset.name) / "token_grouping.csv"
+        PROJECT_ROOT / "logs" / "gps" / str(cfg.name) / "token_grouping.csv"
     )
 
     for rho in rhos:
@@ -194,12 +209,24 @@ def main() -> None:
         model = build_codec_model(
             cfg,
             legacy_cfg,
-            num_classes=loaders.num_classes,
             camera_num=loaders.camera_num,
             view_num=loaders.view_num,
         )
         probe = install_token_grouping_probe(model)
-        print(f"\nEvaluating {cfg.dataset.name} at rho={rho:.1f}")
+        selection_streams: list[bytes | None] = []
+
+        def collect_selection_streams(coded_unit, group_count: int) -> None:
+            rows = coded_unit["strings"].get("selection_map")
+            if rows is None:
+                selection_streams.extend([None] * group_count)
+                return
+            if len(rows) != group_count:
+                raise RuntimeError(
+                    "selection-map stream batch does not match grouped features"
+                )
+            selection_streams.extend(row[0] for row in rows)
+
+        print(f"\nEvaluating {cfg.name} at rho={rho:.1f}")
         task = evaluate_model(
             legacy_cfg,
             model,
@@ -207,8 +234,15 @@ def main() -> None:
             loaders.gallery,
             loaders.num_query,
             real_codec=True,
+            on_query_coded_unit=collect_selection_streams,
         )
-        row = summarize_run(probe.records, task, cfg.token_grouping, rho)
+        row = summarize_run(
+            probe.records,
+            selection_streams,
+            task,
+            cfg.token_grouping,
+            rho,
+        )
         rows.append(row)
         write_csv(output, rows)
         write_json(output.with_suffix(".json"), rows)

@@ -5,7 +5,7 @@ from itertools import repeat
 import torch
 import torch.nn as nn
 
-from cofai.token_grouping import GraphTokenGrouper
+from cofai.token_grouping import GPSTokenGrouper
 
 # The public GPS evaluation path uses the transformer backbone only.
 # from torch._six import container_abcs
@@ -249,7 +249,7 @@ class OverlapPatchEmbed(nn.Module):
         return x
 
 
-class TransReID_sep(nn.Module):
+class GPSTransReIDVisionTransformer(nn.Module):
     """
     Transformer-based Object Re-Identification
     separate modeling
@@ -277,7 +277,11 @@ class TransReID_sep(nn.Module):
         norm_layer=nn.LayerNorm,
         local_feature=False,
         sie_xishu=1.0,
-        cfg=None,
+        cls_token_num=1,
+        pruning_layers=(),
+        pruning_ratios=(),
+        propagation_max_iter=10,
+        beta=0.1,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -292,14 +296,15 @@ class TransReID_sep(nn.Module):
             in_chans=in_chans,
             embed_dim=embed_dim,
         )
-        self.cls_token_num = cfg.cls_token_num
-
-        self.cfg = cfg
+        self.cls_token_num = int(cls_token_num)
 
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.cls_token2 = nn.Parameter(torch.zeros(1, cfg.cls_token_num - 1, embed_dim))
+        # Retained for compatibility with the released GPS checkpoints.
+        self.cls_token2 = nn.Parameter(
+            torch.zeros(1, self.cls_token_num - 1, embed_dim)
+        )
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
 
         self.cam_num = camera
@@ -335,12 +340,23 @@ class TransReID_sep(nn.Module):
             x.item() for x in torch.linspace(0, drop_path_rate, depth)
         ]  # stochastic depth decay rule
 
-        self.token_pruning_ratios = cfg.MODEL.TOKEN_PRUNING_RATIO
-        self.background_pruning_layers = cfg.MODEL.BACKGROUND_PRUNING_LAYERS
-        self.background_pruning_ratios = cfg.MODEL.BACKGROUND_PRUNING_RATIOS
-        self.propagation_max_iter = cfg.MODEL.PROPAGATION_MAX_ITER
-        self.beta = cfg.MODEL.BETA
-        self.token_grouper = GraphTokenGrouper(
+        self.background_pruning_layers = tuple(int(layer) for layer in pruning_layers)
+        self.background_pruning_ratios = tuple(float(ratio) for ratio in pruning_ratios)
+        if len(self.background_pruning_layers) != len(self.background_pruning_ratios):
+            raise ValueError("GPS pruning layers and ratios must have equal lengths")
+        if tuple(
+            sorted(set(self.background_pruning_layers))
+        ) != self.background_pruning_layers or any(
+            layer < 0 or layer >= depth - 1 for layer in self.background_pruning_layers
+        ):
+            raise ValueError(
+                "GPS pruning layers must be unique, increasing block indices"
+            )
+        if any(not 0.0 <= ratio < 1.0 for ratio in self.background_pruning_ratios):
+            raise ValueError("GPS pruning ratios must be in [0, 1)")
+        self.propagation_max_iter = int(propagation_max_iter)
+        self.beta = float(beta)
+        self.token_grouper = GPSTokenGrouper(
             max_iter=self.propagation_max_iter,
             beta=self.beta,
         )
@@ -410,8 +426,6 @@ class TransReID_sep(nn.Module):
         view_id,
         label=None,
         multi_view=False,
-        flip_view=False,
-        extra_token=False,
         dataset_name="train",
     ):
 
@@ -459,33 +473,22 @@ class TransReID_sep(nn.Module):
                 lsort = lsort.reshape((-1, viewpoint_num))
                 assert torch.all(label[lsort[:, 0]] == label[lsort[:, 1]])
                 assert torch.all(label[lsort[:, 1]] == label[lsort[:, 2]])
-                self.token_pruning_ratio = self.cfg.MODEL.TOKEN_PRUNING_RATIO
-                self.background_pruning_ratios = (
-                    self.cfg.MODEL.BACKGROUND_PRUNING_RATIOS
-                )
+                pruning_ratios = self.background_pruning_ratios
 
             elif dataset_name == "query" or dataset_name == "test":
                 viewpoint_num = 3
                 lsort = torch.arange(x.size(0)).reshape((-1, viewpoint_num))
                 assert torch.all(label[lsort[:, 0]] == label[lsort[:, 1]])
                 assert torch.all(label[lsort[:, 1]] == label[lsort[:, 2]])
-                self.token_pruning_ratio = self.cfg.MODEL.TOKEN_PRUNING_RATIO
-                self.background_pruning_ratios = (
-                    self.cfg.MODEL.BACKGROUND_PRUNING_RATIOS
-                )
+                pruning_ratios = self.background_pruning_ratios
 
             elif dataset_name == "gallery":
                 viewpoint_num = 1
                 lsort = torch.arange(x.size(0)).reshape((-1, viewpoint_num))
-
                 # Single-view does not need pruning
-                self.background_pruning_ratios = (
-                    self.cfg.MODEL.BACKGROUND_PRUNING_RATIOS
-                )
-                self.background_pruning_ratios = [
-                    0.0 for _ in self.background_pruning_ratios
-                ]  # No background pruning for single-view
-                self.token_pruning_ratio = 0.0
+                pruning_ratios = (0.0,) * len(self.background_pruning_ratios)
+            else:
+                raise ValueError(f"unsupported GPS dataset split: {dataset_name!r}")
 
             split = 8
             if self.local_feature:
@@ -494,99 +497,74 @@ class TransReID_sep(nn.Module):
                 for v in range(viewpoint_num):
                     x_views.append(x[lsort[:, v]])
 
-                if "transreid_baseline" in self.cfg.descrip:  # Directly Concat
-                    patch_tokens_list = []
-                    for v in range(viewpoint_num):
-                        patch_tokens_list.append(x_views[v][:, 1:])
-                    patch_tokens_all = torch.cat(patch_tokens_list, dim=1)
-
-                    x_fused = torch.cat([x_views[0][:, 0:1], patch_tokens_all], dim=1)
-
-                    for i, blk in enumerate(self.blocks[:-1]):
-                        x_fused = blk(x_fused)
-                    original_token_count = viewpoint_num * self.patch_embed.num_patches
-                    selection_indices = (
-                        torch.arange(
-                            original_token_count,
-                            device=x.device,
-                        )
-                        .unsqueeze(0)
-                        .repeat(x_fused.shape[0], 1)
+                num_patches = self.patch_embed.num_patches
+                batch_size_per_group = x_views[0].size(0)
+                orig_indices_per_view = [
+                    torch.arange(
+                        view_index * num_patches,
+                        (view_index + 1) * num_patches,
+                        device=x.device,
                     )
+                    .unsqueeze(0)
+                    .repeat(batch_size_per_group, 1)
+                    for view_index in range(viewpoint_num)
+                ]
 
-                elif "gps_multi_view" in self.cfg.descrip:
-                    num_patches = self.patch_embed.num_patches
-                    batch_size_per_group = x_views[0].size(0)
-                    orig_indices_per_view = [
-                        torch.arange(
-                            view_index * num_patches,
-                            (view_index + 1) * num_patches,
-                            device=x.device,
+                pruning_index = 0
+                for i, blk in enumerate(self.blocks[:-1]):
+                    if i == split:
+                        cls_token_fused = (
+                            sum(view_tokens[:, 0:1] for view_tokens in x_views)
+                            / viewpoint_num
                         )
-                        .unsqueeze(0)
-                        .repeat(batch_size_per_group, 1)
-                        for view_index in range(viewpoint_num)
-                    ]
+                        patch_tokens_all = torch.cat(
+                            [view_tokens[:, 1:] for view_tokens in x_views],
+                            dim=1,
+                        )
+                        x_fused = torch.cat(
+                            [cls_token_fused, patch_tokens_all],
+                            dim=1,
+                        )
+                        orig_indices_fused = torch.cat(
+                            orig_indices_per_view,
+                            dim=1,
+                        )
 
-                    bg_index = 0
-                    for i, blk in enumerate(self.blocks[:-1]):
-                        if i == split:
-                            # cat patch_tokens
-                            cls_token_fused = 0
-                            for v in range(viewpoint_num):
-                                cls_token_fused += x_views[v][:, 0:1]
-                            cls_token_fused = cls_token_fused / viewpoint_num
-
-                            patch_tokens_list = []
-                            for v in range(viewpoint_num):
-                                patch_tokens_list.append(x_views[v][:, 1:])
-
-                            patch_tokens_all = torch.cat(patch_tokens_list, dim=1)
-                            x_fused = torch.cat(
-                                [cls_token_fused, patch_tokens_all], dim=1
+                    if i < split:
+                        for v in range(viewpoint_num):
+                            x_views[v], attn_views[v] = blk(
+                                x_views[v],
+                                need_attn=True,
                             )
-                            orig_indices_fused = torch.cat(
-                                orig_indices_per_view,
-                                dim=1,
-                            )
+                    else:
+                        x_fused, attn_fused = blk(x_fused, need_attn=True)
+
+                    if i in self.background_pruning_layers:
+                        keep_ratio = 1.0 - pruning_ratios[pruning_index]
+                        pruning_index += 1
 
                         if i < split:
                             for v in range(viewpoint_num):
-                                assert x_views[v] is not None
-                                x_views[v], attn_views[v] = blk(
-                                    x_views[v], need_attn=True
+                                x_views[v], orig_indices_per_view[v], _, _ = (
+                                    self.token_pruning_graph_partitioning(
+                                        x=x_views[v],
+                                        attn=attn_views[v],
+                                        keep_ratio=keep_ratio,
+                                        orig_indices=orig_indices_per_view[v],
+                                    )
                                 )
                         else:
-                            x_fused, attn_fused = blk(x_fused, need_attn=True)
-
-                        if i in self.background_pruning_layers:
-                            bg_pruning_ratio = self.background_pruning_ratios[bg_index]
-                            bg_index += 1
-                            keep_ratio = 1.0 - bg_pruning_ratio
-
-                            if i < split:
-                                for v in range(viewpoint_num):
-                                    x_views[v], orig_indices_per_view[v], _, _ = (
-                                        self.token_pruning_graph_partitioning(
-                                            x=x_views[v],
-                                            attn=attn_views[v],
-                                            keep_ratio=keep_ratio,
-                                            orig_indices=orig_indices_per_view[v],
-                                        )
-                                    )
-
-                            else:
-                                x_fused, orig_indices_fused, _, _ = (
-                                    self.token_pruning_graph_partitioning(
-                                        x=x_fused,
-                                        attn=attn_fused,
-                                        keep_ratio=keep_ratio,
-                                        orig_indices=orig_indices_fused,
-                                    )
+                            x_fused, orig_indices_fused, _, _ = (
+                                self.token_pruning_graph_partitioning(
+                                    x=x_fused,
+                                    attn=attn_fused,
+                                    keep_ratio=keep_ratio,
+                                    orig_indices=orig_indices_fused,
                                 )
+                            )
 
-                    original_token_count = viewpoint_num * num_patches
-                    selection_indices = orig_indices_fused
+                original_token_count = viewpoint_num * num_patches
+                selection_indices = orig_indices_fused
 
                 return (
                     x_fused,
@@ -610,8 +588,6 @@ class TransReID_sep(nn.Module):
         view_label=None,
         label=None,
         multi_view=False,
-        flip_view=False,
-        extra_token=False,
         dataset_name="train",
     ):
         x = self.forward_features(
@@ -620,14 +596,12 @@ class TransReID_sep(nn.Module):
             view_label,
             label=label,
             multi_view=multi_view,
-            flip_view=flip_view,
-            extra_token=extra_token,
             dataset_name=dataset_name,
         )
         return x
 
 
-def vit_base_patch16_224_TransReID_seq(
+def build_gps_transreid_vit(
     img_size=(256, 128),
     stride_size=16,
     drop_rate=0.0,
@@ -640,7 +614,7 @@ def vit_base_patch16_224_TransReID_seq(
     **kwargs,
 ):
 
-    model = TransReID_sep(
+    model = GPSTransReIDVisionTransformer(
         img_size=img_size,
         patch_size=16,
         stride_size=stride_size,

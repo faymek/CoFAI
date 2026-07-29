@@ -83,7 +83,10 @@ def inference_model(
         dec_time = time.time() - t1
 
         bits_items = bits_from_coded_data(coded_data)
-        time_items = {"total_enc_time": float(enc_time), "total_dec_time": float(dec_time)}
+        time_items = {
+            "total_enc_time": float(enc_time),
+            "total_dec_time": float(dec_time),
+        }
         if profile:
             time_items.update(getattr(model, "_codec_time", {}) or {})
         return time_items, bits_items, task_feats
@@ -98,7 +101,10 @@ def inference_model(
     )
     elapsed = time.time() - t0
     bits_items = bits_from_coded_data(coded_data)
-    time_items = {"total_enc_time": float(elapsed) / 2.0, "total_dec_time": float(elapsed) / 2.0}
+    time_items = {
+        "total_enc_time": float(elapsed) / 2.0,
+        "total_dec_time": float(elapsed) / 2.0,
+    }
     if profile:
         time_items.update(getattr(model, "_codec_time", {}) or {})
     return time_items, bits_items, task_feats
@@ -267,7 +273,9 @@ def eval_step(
     device = step_ctx["device"]
     task_specs = step_ctx.get("task_specs")
     label_to_kind = _label_to_kind_from_task_specs(task_specs)
-    pairs = [(str(task), str(label_to_kind.get(str(task), str(task)))) for task in tasks]
+    pairs = [
+        (str(task), str(label_to_kind.get(str(task), str(task)))) for task in tasks
+    ]
 
     bs = len(batch.samples)
     if bs != 1:
@@ -608,7 +616,9 @@ def multi_run(cfg: Any):
     _, plan = resolve_plan(cfg)
     base_name = str(plan.name)
     base_desc = str(plan.description)
-    group_dir = os.path.join(str(cfg.args.output_dir or "").strip() or "logs", base_name)
+    group_dir = os.path.join(
+        str(cfg.args.output_dir or "").strip() or "logs", base_name
+    )
     os.makedirs(group_dir, exist_ok=True)
 
     qualities: list[str] = []

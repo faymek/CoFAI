@@ -1,8 +1,8 @@
 """Task-independent token grouping utilities."""
 
-from .gps import GraphTokenGrouper, TokenGroupingResult
+from .gps import GPSTokenGrouper, TokenGroupingResult
 
 __all__ = [
-    "GraphTokenGrouper",
+    "GPSTokenGrouper",
     "TokenGroupingResult",
 ]

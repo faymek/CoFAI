@@ -22,7 +22,7 @@ class TokenGroupingResult:
     keep_mask: torch.Tensor
 
 
-class GraphTokenGrouper:
+class GPSTokenGrouper:
     """Select patch tokens using attention propagation from the class token."""
 
     def __init__(self, max_iter: int = 10, beta: float = 0.1, eps: float = 1e-3):

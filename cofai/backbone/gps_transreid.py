@@ -7,9 +7,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from cofai.index_codecs import AdaptiveBitmapIndexCodec
-
-_SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
+from cofai.index_codecs import BoundedIndexSetBatch
 
 
 @dataclass(frozen=True)
@@ -49,30 +47,45 @@ class GPSTransReIDBackbone(nn.Module):
     preserves the checkpoint's global branch and four JPM local branches.
     """
 
-    def __init__(self, model: nn.Module):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        global_decoder: nn.Module,
+        local_decoder: nn.Module,
+        *,
+        cls_token_num: int,
+        shuffle_groups: int,
+        shift_num: int,
+        divide_length: int,
+        rearrange: bool,
+    ):
         super().__init__()
-        self.base = model.base
-        self.global_decoder = model.b1
-        self.local_decoder = model.b2
-        self.cls_token_num = int(model.cls_token_num)
-        self.shuffle_groups = int(model.shuffle_groups)
-        self.shift_num = int(model.shift_num)
-        self.divide_length = int(model.divide_length)
-        self.rearrange = bool(model.rearrange)
+        self.encoder = encoder
+        self.global_decoder = global_decoder
+        self.local_decoder = local_decoder
+        self.cls_token_num = int(cls_token_num)
+        self.shuffle_groups = int(shuffle_groups)
+        self.shift_num = int(shift_num)
+        self.divide_length = int(divide_length)
+        self.rearrange = bool(rearrange)
+        if self.divide_length != 4:
+            raise ValueError(
+                "the released GPS TransReID head requires exactly four JPM branches"
+            )
 
     @property
     def patches_per_view(self) -> int:
         """Return the spatial token count produced for one input view."""
-        return int(self.base.patch_embed.num_patches)
+        return int(self.encoder.patch_embed.num_patches)
 
     @property
     def token_grouper(self):
         """Return the grouping callable used inside the GPS Transformer."""
-        return self.base.token_grouper
+        return self.encoder.token_grouper
 
     @token_grouper.setter
     def token_grouper(self, grouper) -> None:
-        self.base.token_grouper = grouper
+        self.encoder.token_grouper = grouper
 
     def encode(
         self,
@@ -86,34 +99,21 @@ class GPSTransReIDBackbone(nn.Module):
         dataset_name="train",
         **kwargs,
     ):
-        if multi_view:
-            h, _order, _flops, selection = self.base(
-                x,
-                cam_label=cam_label,
-                view_label=view_label,
-                label=label,
-                multi_view=True,
-                flip_view=flip_view,
-                extra_token=extra_token,
-                dataset_name=dataset_name,
+        if not multi_view:
+            raise ValueError("GPSTransReIDBackbone requires multi_view=True")
+        if flip_view or extra_token:
+            raise ValueError(
+                "the released GPS checkpoint does not implement flip_view or "
+                "extra_token inference"
             )
-        else:
-            h = self.base(
-                x,
-                cam_label=cam_label,
-                view_label=view_label,
-                label=label,
-                multi_view=False,
-                extra_token=extra_token,
-                dataset_name=dataset_name,
-            )
-            selection = None
-
-        if selection is None:
-            raise RuntimeError(
-                "GPS encoder did not expose a final token-selection map; "
-                "multi-view GPS inference is required"
-            )
+        h, _order, _flops, selection = self.encoder(
+            x,
+            cam_label=cam_label,
+            view_label=view_label,
+            label=label,
+            multi_view=True,
+            dataset_name=dataset_name,
+        )
         indices = selection["indices"]
         token_count = int(selection["token_count"])
         if h.ndim != 3 or h.shape[0] != indices.shape[0]:
@@ -123,21 +123,17 @@ class GPSTransReIDBackbone(nn.Module):
                 "GPS compact feature must contain one CLS token plus retained patches"
             )
 
-        strings: dict[str, list[list[bytes]]] = {}
+        index_sets = {}
         is_pruned = indices.shape[1] < token_count
         if is_pruned:
-            rows = []
-            for values in indices.detach().cpu().tolist():
-                payload = _SELECTION_MAP_CODEC.encode(
-                    values,
-                    token_count,
-                ).to_bytes()
-                rows.append([payload])
-            strings["selection_map"] = rows
+            index_sets["selection_map"] = BoundedIndexSetBatch(
+                indices=indices,
+                universe_size=token_count,
+            )
 
         return {
             "h": h,
-            "strings": strings,
+            "index_sets": index_sets,
             "pstate": {
                 "extra_token": bool(extra_token),
                 "original_patch_tokens": token_count,

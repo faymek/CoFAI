@@ -7,8 +7,7 @@ import time
 import numpy as np
 import torch
 
-from cofai.engine.run_eval import _bits_from_coded_unit
-from cofai.models import CommonFeatureCodecModel
+from cofai.engine import bits_from_coded_unit
 
 from .metrics import R1_mAP_eval
 
@@ -22,9 +21,7 @@ def _output_order(batch_meta, dataset_name: str) -> np.ndarray:
             f"{dataset_name} batch size must be divisible by {views_per_group}"
         )
     groups = np.arange(pids.size).reshape(-1, views_per_group)
-    if views_per_group > 1 and not np.all(
-        pids[groups] == pids[groups][:, :1]
-    ):
+    if views_per_group > 1 and not np.all(pids[groups] == pids[groups][:, :1]):
         raise ValueError("each GPS query group must contain one vehicle identity")
     return groups[:, 0]
 
@@ -37,6 +34,7 @@ def evaluate_model(
     num_query,
     *,
     real_codec=False,
+    on_query_coded_unit=None,
 ):
     """Run multi-view retrieval and return task quality plus coded query rate."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,23 +69,23 @@ def evaluate_model(
                     "extra_token": False,
                     "dataset_name": dataset_name,
                 }
-                if isinstance(model, CommonFeatureCodecModel):
-                    if real_codec:
-                        coded = model.compress(img, tasks=["reid"], **model_kwargs)
-                        task_outputs = model.decompress(coded, tasks=["reid"])
-                    else:
-                        coded, task_outputs = model.forward_test(
-                            img,
-                            tasks=["reid"],
-                            **model_kwargs,
-                        )
-                    feature = task_outputs["reid"]
-                    if dataset_name == "query":
-                        for name, value in _bits_from_coded_unit(coded).items():
-                            rate_bits[name] = rate_bits.get(name, 0.0) + float(value)
-                        coded_groups += int(feature.shape[0])
+                if real_codec:
+                    coded = model.compress(img, tasks=["reid"], **model_kwargs)
+                    task_outputs = model.decompress(coded, tasks=["reid"])
                 else:
-                    feature, _model_order = model(img, **model_kwargs)
+                    coded, task_outputs = model.forward_test(
+                        img,
+                        tasks=["reid"],
+                        **model_kwargs,
+                    )
+                feature = task_outputs["reid"]
+                if dataset_name == "query":
+                    for name, value in bits_from_coded_unit(coded).items():
+                        rate_bits[name] = rate_bits.get(name, 0.0) + float(value)
+                    group_count = int(feature.shape[0])
+                    coded_groups += group_count
+                    if on_query_coded_unit is not None:
+                        on_query_coded_unit(coded, group_count)
 
                 order = _output_order(batch_meta, dataset_name)
                 evaluator.update(

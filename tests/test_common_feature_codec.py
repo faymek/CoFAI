@@ -4,7 +4,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from cofai.engine.run_eval import _bits_from_coded_unit
+from cofai.engine import bits_from_coded_unit
+from cofai.index_codecs import AdaptiveBitmapIndexCodec, BoundedIndexSetBatch
 from cofai.latent_codecs import RawDtypeCodec
 from cofai.models import CommonFeatureCodecModel
 
@@ -14,15 +15,16 @@ class _SplitBackbone(nn.Module):
         return {
             "h": x,
             "pstate": {"bias": 0.25},
-            "meta": {"order": torch.arange(x.shape[0])},
-            "strings": {"selection_map": [[b"map"] for _ in range(x.shape[0])]},
+            "index_sets": {
+                "selection_map": BoundedIndexSetBatch(
+                    indices=torch.arange(0, x.shape[1], 2).expand(x.shape[0], -1),
+                    universe_size=x.shape[1],
+                ),
+            },
         }
 
-    def decode(self, h, *, pstate, meta, tasks, **kwargs):
-        return {
-            "reid": h + pstate["bias"],
-            "order": meta["order"],
-        }
+    def decode(self, h, *, pstate, tasks, **kwargs):
+        return {"reid": h + pstate["bias"]}
 
 
 class _PlainBackbone(nn.Module):
@@ -74,25 +76,26 @@ def test_common_model_flattens_codec_and_selection_streams():
     model = CommonFeatureCodecModel(
         backbone=_SplitBackbone(),
         codec=RawDtypeCodec(dtype="float16"),
+        index_codecs={"selection_map": AdaptiveBitmapIndexCodec()},
         post_process=None,
     )
 
     coded = model.compress(h, tasks=["reid"])
 
-    assert set(coded) == {"strings", "pstate", "meta"}
+    assert set(coded) == {"strings", "pstate"}
     assert set(coded["strings"]) == {"feature", "selection_map"}
     assert "codec" not in coded["strings"]
     assert "pre_process" not in coded["strings"]
-    assert set(coded["meta"]) == {"order"}
     assert "bias" in coded["pstate"]
-    bits = _bits_from_coded_unit(coded)
+    bits = bits_from_coded_unit(coded)
     assert bits["feature"] == h.numel() * 16
-    assert bits["selection_map"] == h.shape[0] * len(b"map") * 8
+    assert bits["selection_map"] == sum(
+        len(row[0]) * 8 for row in coded["strings"]["selection_map"]
+    )
 
     decoded = model.decompress(coded, tasks=["reid"])
     expected = h.to(torch.float16).to(h.dtype) + 0.25
     torch.testing.assert_close(decoded["reid"], expected, rtol=0, atol=0)
-    torch.testing.assert_close(decoded["order"], torch.arange(h.shape[0]))
 
 
 def test_common_model_estimated_path_counts_all_flat_streams():
@@ -100,13 +103,20 @@ def test_common_model_estimated_path_counts_all_flat_streams():
     model = CommonFeatureCodecModel(
         backbone=_SplitBackbone(),
         codec=RawDtypeCodec(dtype="float16"),
+        index_codecs={"selection_map": AdaptiveBitmapIndexCodec()},
     )
 
     coded, decoded = model.forward_test(h, tasks=["reid"])
 
+    expected_rows = AdaptiveBitmapIndexCodec().encode_batch(
+        BoundedIndexSetBatch(
+            indices=torch.arange(0, h.shape[1], 2).expand(h.shape[0], -1),
+            universe_size=h.shape[1],
+        )
+    )
     assert coded["bits"] == {
         "feature": float(h.numel() * 16),
-        "selection_map": float(h.shape[0] * len(b"map") * 8),
+        "selection_map": float(sum(len(row[0]) * 8 for row in expected_rows)),
     }
     assert decoded["reid"].shape == h.shape
 

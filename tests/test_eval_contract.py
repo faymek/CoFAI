@@ -4,8 +4,11 @@ from types import SimpleNamespace
 
 import torch
 
-from cofai.engine.bitrate import bits_from_coded_unit
-from cofai.engine.run_eval import eval_step, inference_model
+from cofai.engine import bits_from_coded_unit
+from cofai.engine.run_eval import (
+    eval_step,
+    inference_model,
+)
 from cofai.engine.schema import EvalBatch
 
 

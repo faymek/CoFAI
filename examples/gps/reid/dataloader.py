@@ -19,12 +19,11 @@ _DATASET_FACTORIES = {
 
 @dataclass(frozen=True)
 class GPSDataLoaders:
-    """Evaluation inputs and model dimensions for one GPS dataset."""
+    """Evaluation inputs and SIE dimensions for one GPS dataset."""
 
     query: DataLoader
     gallery: DataLoader
     num_query: int
-    num_classes: int
     camera_num: int
     view_num: int
 
@@ -89,7 +88,6 @@ def make_dataloader(cfg) -> GPSDataLoaders:
         query=query_loader,
         gallery=gallery_loader,
         num_query=len(query_sampler) // query_sampler.num_instances,
-        num_classes=dataset.num_train_pids,
         camera_num=camera_num,
         view_num=view_num,
     )

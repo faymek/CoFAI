@@ -1,12 +1,15 @@
-name: muri
+name: MuRI
 description: GPS multi-view evaluation on MuRI
 data_root: ${project_root:}/data
 checkpoint: ${project_root:}/weights/gps/MuRI/transformer.pth
 codec_model:
-  type: CommonFeatureCodecModel
+  type: cofai.models.CommonFeatureCodecModel
   codec:
     type: cofai.latent_codecs.RawDtypeCodec
     dtype: float16
+  index_codecs:
+    selection_map:
+      type: cofai.index_codecs.AdaptiveBitmapIndexCodec
   post_process: null
 dataset:
   name: muri

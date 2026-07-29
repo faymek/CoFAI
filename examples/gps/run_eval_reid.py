@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--batch-size", type=int)
     return parser.parse_args()
 
 
@@ -31,18 +32,21 @@ def main() -> None:
         cfg.data_root = str(args.data_root.resolve())
     if args.checkpoint is not None:
         cfg.checkpoint = str(args.checkpoint.resolve())
+    if args.batch_size is not None:
+        if args.batch_size <= 0 or args.batch_size % 3:
+            raise ValueError("GPS eval batch size must be a positive multiple of 3")
+        cfg.evaluation.batch_size = args.batch_size
 
     legacy_cfg = build_legacy_config(cfg)
     loaders = make_dataloader(legacy_cfg)
     model = build_codec_model(
         cfg,
         legacy_cfg,
-        num_classes=loaders.num_classes,
         camera_num=loaders.camera_num,
         view_num=loaders.view_num,
     )
     result = {
-        "dataset": str(cfg.dataset.name),
+        "dataset": str(cfg.name),
         "checkpoint": str(cfg.checkpoint),
         **evaluate_model(
             legacy_cfg,
@@ -54,7 +58,7 @@ def main() -> None:
         ),
     }
     output = args.output or (
-        PROJECT_ROOT / "logs" / "gps" / str(cfg.dataset.name) / "result.json"
+        PROJECT_ROOT / "logs" / "gps" / str(cfg.name) / "result.json"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

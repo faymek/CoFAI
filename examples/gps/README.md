@@ -5,9 +5,10 @@
 1. AI M2405：基于 GPS 的多视角车辆检索评估。
 2. AI M2460：Token Grouping 的真实原生 dtype 码率和结构侧信息评估。
 
-GPS 的公共实现位于 `cofai/token_grouping/` 和
-`cofai/index_codecs/adaptive_bitmap_index.py`；数据集、模型和任务评估代码仅
-服务于本示例，位于 `examples/gps/reid/`。
+GPS 的公共组件位于 `cofai/backbone/gps_transreid.py`、
+`cofai/heads/gps_transreid.py`、`cofai/token_grouping/` 和
+`cofai/index_codecs/`。数据集、checkpoint 适配和任务评估代码仅服务于
+本示例，位于 `examples/gps/reid/`。
 
 本示例使用与 DINO CTC 相同的特征切分思想，但不会修改已经形成共识的
 `DinoFeatureCodecModel`。GPS 使用平行的探索性模型
@@ -15,7 +16,8 @@ GPS 的公共实现位于 `cofai/token_grouping/` 和
 
 ```text
 GPSTransReIDBackbone.encode（内部执行多层 GPS）
-→ RawDtypeCodec（当前 dtype=float16）
+├─ compact features → RawDtypeCodec（当前 dtype=float16）
+└─ selection indices → AdaptiveBitmapIndexCodec
 → post_process=None（预留变量，当前直接透传）
 → GPSTransReIDBackbone.decode（TransReID 全局与 JPM 局部分支）
 → GPSTransReIDHead（原 bottleneck 与 embedding 拼接）
@@ -28,12 +30,12 @@ encoder 的组成部分，不能被提取成一次性的串行预处理。当前
 本集成不假设其形式或插入位置。
 
 `CommonFeatureCodecModel` 不引入另一套公共接口。普通 backbone 的 `encode`
-仍可只返回特征张量；GPS adapter 因为还产生 selection map，可在 `h` 之外
-附带框架已经定义的 `strings`、`pstate` 和可选 `meta`。最终 `compress`
-输出仍是文档规定的 CodedUnit：
+仍可只返回特征张量；GPS backbone 在 `h` 和 `pstate` 之外返回未编码的
+`index_sets`，由模型配置中的 `index_codecs` 生成结构侧码流。backbone
+不直接写 bytes。最终 `compress` 输出仍是文档规定的 CodedUnit：
 
 ```python
-coded_unit = {"strings": ..., "pstate": ..., "meta": ...}  # meta 可省略
+coded_unit = {"strings": ..., "pstate": ...}
 ```
 
 ReID 的 `pid`、`camid`、图像路径和三视角分组关系属于数据 batch meta。
@@ -92,7 +94,8 @@ CoFAI/
 ```text
 cofai/
 ├── backbone/
-│   └── gps_transreid.py                # GPS TransReID backbone
+│   ├── gps_transreid.py                # CoFAI GPS TransReID backbone 边界
+│   └── gps_transreid_vit.py            # GPS 多视角 ViT 实现
 ├── heads/
 │   └── gps_transreid.py                # GPS TransReID embedding head
 ├── models/
@@ -111,8 +114,6 @@ examples/gps/
 │   ├── MuRI/gps.yml                   # MuRI 数据、模型与评估配置
 │   ├── token_grouping.yml             # M2460 码率与 map 一致性配置
 ├── reid/
-│   ├── backbone/
-│   │   └── vit_pytorch.py             # 原始 GPS TransReID 模型实现
 │   ├── datasets/
 │   │   ├── veri.py                    # VeRi-776 数据集读取
 │   │   ├── muri.py                    # MuRI 数据集读取
@@ -164,7 +165,7 @@ examples/gps/config/token_grouping.yml
 - 完整 compact tensor（CLS + retained patches）的 feature bits、map bits 和
   total BPFP。
 - 结构侧信息占比和相对稠密码流的 rate saving。
-- token map 的独立码流 round-trip 与解码耗时。它只校验结构侧信息，
+- 实际传输 token map 码流的 round-trip 与解码耗时。它只校验结构侧信息，
   不恢复 patch tokens，也不进入 ReID 质量推理路径。
 
 VeRi-776：

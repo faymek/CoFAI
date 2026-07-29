@@ -11,19 +11,23 @@ from cofai.backbone.gps_transreid import GPSTransReIDFeatures
 class GPSTransReIDHead(nn.Module):
     """Apply the released TransReID bottlenecks and embedding concatenation."""
 
-    def __init__(self, model: nn.Module):
+    def __init__(
+        self,
+        bottleneck: nn.Module,
+        local_bottlenecks: list[nn.Module],
+        *,
+        neck_feature: str,
+        cls_token_num: int,
+    ):
         super().__init__()
-        self.neck_feature = str(model.neck_feat)
-        self.cls_token_num = int(model.cls_token_num)
-        self.bottleneck = model.bottleneck
-        self.local_bottlenecks = nn.ModuleList(
-            [
-                model.bottleneck_1,
-                model.bottleneck_2,
-                model.bottleneck_3,
-                model.bottleneck_4,
-            ]
-        )
+        self.neck_feature = str(neck_feature)
+        self.cls_token_num = int(cls_token_num)
+        self.bottleneck = bottleneck
+        self.local_bottlenecks = nn.ModuleList(local_bottlenecks)
+        if len(self.local_bottlenecks) != 4:
+            raise ValueError(
+                "the released GPS TransReID head requires four local bottlenecks"
+            )
 
     def forward(self, features: GPSTransReIDFeatures) -> torch.Tensor:
         if not isinstance(features, GPSTransReIDFeatures):

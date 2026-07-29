@@ -2,10 +2,12 @@
 
 from .adaptive_bitmap_index import (
     AdaptiveBitmapIndexCodec,
-    EncodedSelectionMap,
+    BoundedIndexSetBatch,
+    EncodedIndexSet,
 )
 
 __all__ = [
     "AdaptiveBitmapIndexCodec",
-    "EncodedSelectionMap",
+    "BoundedIndexSetBatch",
+    "EncodedIndexSet",
 ]
