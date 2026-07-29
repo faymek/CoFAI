@@ -1,5 +1,5 @@
 # SoftPQ / ORFC-2446 DINOv2 数据与权重清单 (cofai-download manifest)
-# poetry run cofai-download examples/orfc_2446/dinov2/dinov2-orfc_2446.manifest.txt
+# poetry -C "$PROJECT_ROOT" run cofai-download "$SOURCE_ROOT/examples/orfc_2446/dinov2/dinov2-orfc_2446.manifest.txt"
 #
 # 清单格式: <目标相对路径>  [URL]  [sha256:..]
 # 目标路径相对仓库根目录 (PROJECT_ROOT)。
@@ -10,7 +10,7 @@
 # 下载 zip 后请解压:
 #   bash examples/orfc_2446/dinov2/scripts/unzip_softpq_weights.sh
 #
-# 覆盖 conf/plan/dinov2/*SoftPQ* 全部在线评测
+# 覆盖 examples/orfc_2446/plan/dinov2/*ORFC* 全部在线评测
 # (ViT-L/14: blk05/10/15/20; ViT-G/14: blk09/19/29)。
 
 
