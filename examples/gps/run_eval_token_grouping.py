@@ -9,10 +9,7 @@ from pathlib import Path
 
 import torch
 
-from cofai.token_codecs.token_selection_map import (
-    decode_selection_indices,
-    encode_selection_indices,
-)
+from cofai.index_codecs import AdaptiveBitmapIndexCodec
 from examples.gps.config import load_config
 from examples.gps.model import build_codec_model
 from examples.gps.reid.dataloader import make_dataloader
@@ -26,6 +23,7 @@ from examples.gps.token_grouping_eval.bitrate import bitrate_record
 from examples.gps.token_grouping_eval.result_writer import write_csv, write_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,21 +51,21 @@ def benchmark_selection_map(
     if len(record.kept_indices) == record.n_tokens:
         decoded = record.kept_indices
     else:
-        encoded_stream = encode_selection_indices(
+        encoded_stream = SELECTION_MAP_CODEC.encode(
             record.kept_indices,
             record.n_tokens,
         ).to_bytes()
-        decoded = decode_selection_indices(encoded_stream)
+        decoded = SELECTION_MAP_CODEC.decode(encoded_stream)
     if decoded != record.kept_indices:
         raise RuntimeError("selection-map round trip failed")
 
     parse_times = []
     if encoded_stream is not None:
         for _ in range(warmup):
-            decode_selection_indices(encoded_stream)
+            SELECTION_MAP_CODEC.decode(encoded_stream)
         for _ in range(repeats):
             start = time.perf_counter()
-            decode_selection_indices(encoded_stream)
+            SELECTION_MAP_CODEC.decode(encoded_stream)
             parse_times.append((time.perf_counter() - start) * 1000.0)
 
     return {
@@ -103,7 +101,7 @@ def summarize_run(records: list[ProbeRecord], task: dict, tg, rho: float) -> dic
         if kept_count == record.n_tokens:
             map_bits = 0
         else:
-            map_bits = encode_selection_indices(
+            map_bits = SELECTION_MAP_CODEC.encode(
                 record.kept_indices, record.n_tokens
             ).stream_bits
         # The transmitted compact tensor contains one CLS token in addition to

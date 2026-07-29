@@ -5,10 +5,12 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from cofai.token_codecs import encode_selection_indices
+from cofai.index_codecs import AdaptiveBitmapIndexCodec
 from examples.gps.reid.head import GPSReIDFeatures
 
 from .utils import shuffle_unit
+
+SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
 
 
 class GPSReIDBackbone(nn.Module):
@@ -98,7 +100,7 @@ class GPSReIDBackbone(nn.Module):
         if is_pruned:
             rows = []
             for values in indices.detach().cpu().tolist():
-                payload = encode_selection_indices(values, token_count).to_bytes()
+                payload = SELECTION_MAP_CODEC.encode(values, token_count).to_bytes()
                 rows.append([payload])
             strings["selection_map"] = rows
 

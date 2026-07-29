@@ -6,7 +6,7 @@
 2. AI M2460：Token Grouping 的真实原生 dtype 码率和结构侧信息评估。
 
 GPS 的公共实现位于 `cofai/token_grouping/` 和
-`cofai/token_codecs/token_selection_map.py`；数据集、模型和任务评估代码仅
+`cofai/index_codecs/adaptive_bitmap_index.py`；数据集、模型和任务评估代码仅
 服务于本示例，位于 `examples/gps/reid/`。
 
 本示例使用与 DINO CTC 相同的特征切分思想，但不会修改已经形成共识的
@@ -97,8 +97,8 @@ cofai/
 │   └── raw_dtype.py                    # 原生 dtype 数值量化与原始特征码流
 ├── token_grouping/
 │   └── gps.py                         # GPS 图划分 Token Grouping 公共实现
-└── token_codecs/
-    └── token_selection_map.py         # Token selection map 编解码
+└── index_codecs/
+    └── adaptive_bitmap_index.py       # Bitmap/index-list 自适应索引编解码
 
 examples/gps/
 ├── model.py                            # Common model + GPS backbone 构建

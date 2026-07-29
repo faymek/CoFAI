@@ -4,10 +4,9 @@ import pytest
 import torch
 from types import SimpleNamespace
 
-from cofai.token_codecs import (
+from cofai.index_codecs import (
+    AdaptiveBitmapIndexCodec,
     EncodedSelectionMap,
-    decode_selection_indices,
-    encode_selection_indices,
 )
 from cofai.token_grouping import GraphTokenGrouper
 from examples.gps.config import load_config
@@ -17,14 +16,30 @@ from examples.gps.reid.head import GPSReIDHead
 from examples.gps.run_eval_token_grouping import summarize_run
 from examples.gps.token_grouping_eval.model_probe import ProbeRecord
 
+SELECTION_MAP_CODEC = AdaptiveBitmapIndexCodec()
+
 
 def test_selection_indices_round_trip_from_self_contained_stream():
-    encoded = encode_selection_indices([1, 4, 7], token_count=9)
+    encoded = SELECTION_MAP_CODEC.encode([1, 4, 7], token_count=9)
     stream = encoded.to_bytes()
 
     assert encoded.stream_bits == len(stream) * 8
     assert EncodedSelectionMap.from_bytes(stream) == encoded
-    assert decode_selection_indices(stream) == [1, 4, 7]
+    assert SELECTION_MAP_CODEC.decode(stream) == [1, 4, 7]
+
+
+@pytest.mark.parametrize(
+    ("indices", "expected_coding"),
+    [
+        ([3], "index"),
+        (list(range(12)), "bitmap"),
+    ],
+)
+def test_selection_indices_choose_smaller_representation(indices, expected_coding):
+    encoded = SELECTION_MAP_CODEC.encode(indices, token_count=16)
+
+    assert encoded.coding == expected_coding
+    assert SELECTION_MAP_CODEC.decode(encoded) == indices
 
 
 @pytest.mark.parametrize(
@@ -32,12 +47,12 @@ def test_selection_indices_round_trip_from_self_contained_stream():
     [
         b"",
         b"BAD!" + b"\x00" * 9,
-        encode_selection_indices([1], token_count=9).to_bytes() + b"\x00",
+        SELECTION_MAP_CODEC.encode([1], token_count=9).to_bytes() + b"\x00",
     ],
 )
 def test_selection_indices_reject_malformed_streams(stream):
     with pytest.raises(ValueError):
-        decode_selection_indices(stream)
+        SELECTION_MAP_CODEC.decode(stream)
 
 
 def test_graph_grouping_across_operating_points():
@@ -80,7 +95,7 @@ def test_summary_counts_complete_map_stream(feature_bit_depth):
         timing_repeats=1,
         warmup=0,
     )
-    encoded = encode_selection_indices(record.kept_indices, record.n_tokens)
+    encoded = SELECTION_MAP_CODEC.encode(record.kept_indices, record.n_tokens)
     feature_bits = (len(record.kept_indices) + 1) * 8 * feature_bit_depth
 
     summary = summarize_run(
@@ -154,7 +169,7 @@ def test_gps_backbone_emits_flat_map_side_stream_and_keeps_cls():
     assert encoded["h"].shape[1] == encoded["pstate"]["retained_patch_tokens"] + 1
     assert set(encoded["strings"]) == {"selection_map"}
     assert all(
-        decode_selection_indices(row[0]) in ([0, 2], [1, 3])
+        SELECTION_MAP_CODEC.decode(row[0]) in ([0, 2], [1, 3])
         for row in encoded["strings"]["selection_map"]
     )
     decoded = backbone.decode(

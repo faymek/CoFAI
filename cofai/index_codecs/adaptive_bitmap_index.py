@@ -1,4 +1,4 @@
-"""Bit-true codecs for token selection maps and ordered index sets."""
+"""Adaptive bitmap/index-list coding for token-selection index sets."""
 
 from __future__ import annotations
 
@@ -70,6 +70,66 @@ class EncodedSelectionMap:
         return encoded
 
 
+class AdaptiveBitmapIndexCodec:
+    """Encode a unique bounded index set using its shorter byte representation.
+
+    Sparse selections use a fixed-width list of absolute indices. Dense selections
+    use one bitmap bit per possible index. The serialized stream includes the
+    selected representation, total index count, and retained index count.
+    """
+
+    def encode(self, indices, token_count: int) -> EncodedSelectionMap:
+        """Encode indices using the smaller bitmap or fixed-width index payload."""
+        values = _validate_indices(indices, token_count)
+        bitmap = bytearray(ceil(token_count / 8))
+        for index in values:
+            bitmap[index // 8] |= 1 << (index % 8)
+        width = max(1, ceil(log2(token_count)))
+        index_payload = _pack_fixed_width(values, width)
+        if len(index_payload) < len(bitmap):
+            return EncodedSelectionMap(
+                "index",
+                token_count,
+                len(values),
+                index_payload,
+            )
+        return EncodedSelectionMap(
+            "bitmap",
+            token_count,
+            len(values),
+            bytes(bitmap),
+        )
+
+    def decode(
+        self,
+        encoded: EncodedSelectionMap | bytes | bytearray | memoryview,
+    ) -> list[int]:
+        """Decode an encoded object or independently decodable byte stream."""
+        if not isinstance(encoded, EncodedSelectionMap):
+            encoded = EncodedSelectionMap.from_bytes(encoded)
+        _validate_encoded_payload(encoded)
+        if encoded.coding == "index":
+            values = _unpack_fixed_width(
+                encoded.payload,
+                encoded.kept_count,
+                max(1, ceil(log2(encoded.token_count))),
+            )
+        elif encoded.coding == "bitmap":
+            values = [
+                index
+                for index in range(encoded.token_count)
+                if encoded.payload[index // 8] & (1 << (index % 8))
+            ]
+        else:
+            raise ValueError(f"unsupported selection-map coding: {encoded.coding}")
+        values = _validate_indices(values, encoded.token_count)
+        if len(values) != encoded.kept_count:
+            raise ValueError(
+                "decoded selection-map cardinality does not match the header"
+            )
+        return values
+
+
 def _validate_indices(indices, token_count: int) -> list[int]:
     values = sorted(int(index) for index in indices)
     if token_count <= 0 or any(index < 0 or index >= token_count for index in values):
@@ -119,19 +179,6 @@ def _unpack_fixed_width(payload: bytes, count: int, width: int) -> list[int]:
     return values
 
 
-def encode_selection_indices(indices, token_count: int) -> EncodedSelectionMap:
-    """Encode indices using the smaller of a bitmap and fixed-width index list."""
-    values = _validate_indices(indices, token_count)
-    bitmap = bytearray(ceil(token_count / 8))
-    for index in values:
-        bitmap[index // 8] |= 1 << (index % 8)
-    width = max(1, ceil(log2(token_count)))
-    index_payload = _pack_fixed_width(values, width)
-    if len(index_payload) < len(bitmap):
-        return EncodedSelectionMap("index", token_count, len(values), index_payload)
-    return EncodedSelectionMap("bitmap", token_count, len(values), bytes(bitmap))
-
-
 def _validate_encoded_payload(encoded: EncodedSelectionMap) -> None:
     if encoded.token_count <= 0:
         raise ValueError("token_count must be positive")
@@ -146,30 +193,3 @@ def _validate_encoded_payload(encoded: EncodedSelectionMap) -> None:
         raise ValueError(f"unsupported selection-map coding: {encoded.coding}")
     if len(encoded.payload) != expected_size:
         raise ValueError(f"{encoded.coding} payload has an invalid length")
-
-
-def decode_selection_indices(
-    encoded: EncodedSelectionMap | bytes | bytearray | memoryview,
-) -> list[int]:
-    """Decode an encoded object or an independently decodable byte stream."""
-    if not isinstance(encoded, EncodedSelectionMap):
-        encoded = EncodedSelectionMap.from_bytes(encoded)
-    _validate_encoded_payload(encoded)
-    if encoded.coding == "index":
-        values = _unpack_fixed_width(
-            encoded.payload,
-            encoded.kept_count,
-            max(1, ceil(log2(encoded.token_count))),
-        )
-    elif encoded.coding == "bitmap":
-        values = [
-            index
-            for index in range(encoded.token_count)
-            if encoded.payload[index // 8] & (1 << (index % 8))
-        ]
-    else:
-        raise ValueError(f"unsupported selection-map coding: {encoded.coding}")
-    values = _validate_indices(values, encoded.token_count)
-    if len(values) != encoded.kept_count:
-        raise ValueError("decoded selection-map cardinality does not match the header")
-    return values
