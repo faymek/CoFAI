@@ -12,8 +12,8 @@ from compressai.models.base import CompressionModel
 from cofai.engine.registry import instantiate_class, register
 
 
-_CONTEXT_KEY = "common_backbone_context"
-_SIDE_STREAMS_KEY = "common_side_streams"
+_CODEC_PSTATE_KEYS = "common_codec_pstate_keys"
+_CODEC_STREAM_KEYS = "common_codec_stream_keys"
 
 
 def _build_component(config_or_module: Any, *, name: str) -> nn.Module:
@@ -55,6 +55,12 @@ class CommonFeatureCodecModel(CompressionModel):
     It is an exploratory integration point for algorithms whose encoder already
     performs feature restructuring, such as GPS token grouping.
 
+    A standard backbone encoder may return only its feature tensor. An adapter that
+    also produces auxiliary DU syntax may return ``h`` together with the documented
+    ``strings``, ``pstate``, and optional ``meta`` fields. The public compressed
+    result remains a regular CodedUnit; this does not define a second backbone
+    protocol.
+
     ``post_process`` is deliberately reserved as ``None``. The correct recovery
     operation depends on the downstream task and has not been established by the
     integrated GPS work; decoded compact features therefore pass through unchanged.
@@ -84,35 +90,39 @@ class CommonFeatureCodecModel(CompressionModel):
     @staticmethod
     def _normalize_encoded(encoded: Any) -> dict[str, Any]:
         if isinstance(encoded, torch.Tensor):
-            return {
-                "h": encoded,
-                "context": {},
-                "strings": {},
-                "bits": {},
-            }
+            return {"h": encoded, "strings": {}, "pstate": {}, "meta": {}}
         if not isinstance(encoded, dict) or "h" not in encoded:
             raise TypeError(
                 "backbone.encode must return a tensor or a dict containing `h`"
             )
         return {
             "h": encoded["h"],
-            "context": dict(encoded.get("context") or {}),
             "strings": dict(encoded.get("strings") or {}),
-            "bits": {
-                str(name): float(value)
-                for name, value in dict(encoded.get("bits") or {}).items()
-            },
+            "pstate": dict(encoded.get("pstate") or {}),
+            "meta": dict(encoded.get("meta") or {}),
         }
 
     def _encode(self, x, **kwargs) -> dict[str, Any]:
         return self._normalize_encoded(self.backbone.encode(x, **kwargs))
 
-    def _decode(self, h_hat, *, context, tasks, **kwargs) -> dict[str, Any]:
+    def _decode(
+        self,
+        h_hat,
+        *,
+        pstate,
+        meta,
+        tasks,
+        **kwargs,
+    ) -> dict[str, Any]:
+        decode_kwargs = dict(kwargs)
+        if pstate:
+            decode_kwargs["pstate"] = pstate
+        if meta:
+            decode_kwargs["meta"] = meta
         decoded = self.backbone.decode(
             h_hat,
-            context=context,
             tasks=list(tasks),
-            **kwargs,
+            **decode_kwargs,
         )
         if not isinstance(decoded, dict):
             if len(tasks) != 1:
@@ -130,11 +140,19 @@ class CommonFeatureCodecModel(CompressionModel):
 
     @staticmethod
     def _codec_args(encoded: dict[str, Any], qp: Any) -> dict[str, Any]:
-        context = encoded["context"]
         return {
-            "token_res": context.get("token_res"),
+            "token_res": encoded["pstate"].get("token_res"),
             "qp": qp,
         }
+
+    def _decode_device(self, requested_device=None) -> torch.device:
+        if requested_device is not None:
+            return torch.device(requested_device)
+        for parameter in self.parameters():
+            return parameter.device
+        for buffer in self.buffers():
+            return buffer.device
+        return torch.device("cpu")
 
     def forward(self, x, qp=0, tasks=None, **kwargs):
         _, task_outputs = self.forward_test(
@@ -159,26 +177,27 @@ class CommonFeatureCodecModel(CompressionModel):
         if "h_hat" not in codec_out:
             raise KeyError("codec.forward must return `h_hat`")
 
-        side_bits = dict(encoded["bits"])
+        auxiliary_bits = _bits_from_strings(encoded["strings"])
         if "bits" in codec_out:
             bits = {
                 str(name): float(value)
                 for name, value in dict(codec_out["bits"]).items()
             }
-            _merge_unique(bits, side_bits, kind="rate")
+            _merge_unique(bits, auxiliary_bits, kind="rate")
             coded_unit = {"bits": bits}
-        elif "likelihoods" in codec_out and not side_bits:
+        elif "likelihoods" in codec_out and not auxiliary_bits:
             coded_unit = {"likelihoods": dict(codec_out["likelihoods"])}
         else:
             raise ValueError(
-                "mixed side-information bits require a codec.forward result "
+                "auxiliary stream bits require a codec.forward result "
                 "using the `bits` contract"
             )
 
         h_hat = codec_out["h_hat"]
         task_outputs = self._decode(
             h_hat,
-            context=encoded["context"],
+            pstate=encoded["pstate"],
+            meta=encoded["meta"],
             tasks=tasks,
             **kwargs,
         )
@@ -194,33 +213,42 @@ class CommonFeatureCodecModel(CompressionModel):
         self._codec_time = {"codec_enc_time": time.time() - start}
 
         strings = dict(coded_unit.get("strings") or {})
-        side_strings = dict(encoded["strings"])
-        _merge_unique(strings, side_strings, kind="stream")
+        codec_stream_keys = tuple(strings)
+        _merge_unique(strings, encoded["strings"], kind="stream")
         # Validate the exact shape consumed by the unmodified eval bit counter.
         _bits_from_strings(strings)
 
         pstate = dict(coded_unit.get("pstate") or {})
-        for reserved in (_CONTEXT_KEY, _SIDE_STREAMS_KEY):
-            if reserved in pstate:
-                raise KeyError(f"codec pstate uses reserved key {reserved!r}")
-        pstate[_CONTEXT_KEY] = encoded["context"]
-        pstate[_SIDE_STREAMS_KEY] = tuple(side_strings)
-        return {"strings": strings, "pstate": pstate}
+        codec_pstate_keys = tuple(pstate)
+        for reserved in (_CODEC_PSTATE_KEYS, _CODEC_STREAM_KEYS):
+            if reserved in pstate or reserved in encoded["pstate"]:
+                raise KeyError(f"component pstate uses reserved key {reserved!r}")
+        _merge_unique(pstate, encoded["pstate"], kind="state")
+        pstate[_CODEC_PSTATE_KEYS] = codec_pstate_keys
+        pstate[_CODEC_STREAM_KEYS] = codec_stream_keys
+
+        result = {"strings": strings, "pstate": pstate}
+        if encoded["meta"]:
+            result["meta"] = encoded["meta"]
+        return result
 
     def decompress(self, coded_unit, tasks=None, **kwargs):
         tasks = list(tasks or [])
         strings = dict(coded_unit["strings"])
         pstate = dict(coded_unit["pstate"])
-        context = pstate.pop(_CONTEXT_KEY)
-        side_streams = tuple(pstate.pop(_SIDE_STREAMS_KEY))
+        codec_pstate_keys = tuple(pstate.pop(_CODEC_PSTATE_KEYS))
+        codec_stream_keys = tuple(pstate.pop(_CODEC_STREAM_KEYS))
         codec_strings = {
-            name: value for name, value in strings.items() if name not in side_streams
+            name: strings[name] for name in codec_stream_keys
         }
+        codec_pstate = {name: pstate.pop(name) for name in codec_pstate_keys}
+        meta = dict(coded_unit.get("meta") or {})
 
         start = time.time()
         decoded = self.codec.decompress(
             strings=codec_strings,
-            pstate=pstate,
+            pstate=codec_pstate,
+            device=self._decode_device(kwargs.get("device")),
         )
         elapsed = time.time() - start
         self._codec_time = getattr(self, "_codec_time", {})
@@ -231,7 +259,8 @@ class CommonFeatureCodecModel(CompressionModel):
         h_hat = decoded["h_hat"]
         return self._decode(
             h_hat,
-            context=context,
+            pstate=pstate,
+            meta=meta,
             tasks=tasks,
             **kwargs,
         )

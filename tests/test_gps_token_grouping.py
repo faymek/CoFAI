@@ -12,6 +12,8 @@ from cofai.token_codecs import (
 from cofai.token_grouping import GraphTokenGrouper
 from examples.gps.config import load_config
 from examples.gps.reid.backbone import GPSReIDBackbone
+from examples.gps.reid.evaluator import _output_order
+from examples.gps.reid.head import GPSReIDHead
 from examples.gps.run_eval_token_grouping import summarize_run
 from examples.gps.token_grouping_eval.model_probe import ProbeRecord
 
@@ -104,36 +106,73 @@ def test_summary_counts_complete_map_stream():
 
 
 def test_gps_backbone_emits_flat_map_side_stream_and_keeps_cls():
-    class DummyBase:
-        pass
+    class DummyBase(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.patch_embed = SimpleNamespace(num_patches=4)
+            self.token_grouper = object()
+
+        def forward(self, x, **kwargs):
+            return (
+                torch.arange(48, dtype=torch.float32).reshape(2, 3, 8),
+                torch.arange(2),
+                0.0,
+                {
+                    "indices": torch.tensor([[0, 2], [1, 3]]),
+                    "token_count": 4,
+                },
+            )
 
     class DummyModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.base = DummyBase()
+            self.b1 = torch.nn.Identity()
+            self.b2 = torch.nn.Identity()
+            self.bottleneck = torch.nn.Identity()
+            self.bottleneck_1 = torch.nn.Identity()
+            self.bottleneck_2 = torch.nn.Identity()
+            self.bottleneck_3 = torch.nn.Identity()
+            self.bottleneck_4 = torch.nn.Identity()
+            self.cls_token_num = 1
+            self.shuffle_groups = 2
+            self.shift_num = 1
+            self.divide_length = 4
+            self.rearrange = False
+            self.neck_feat = "before"
 
-        def encode(self, x, **kwargs):
-            return {
-                "h": torch.zeros(2, 3, 8),
-                "context": {"order": torch.arange(2)},
-                "selection": {
-                    "indices": torch.tensor([[0, 2], [1, 3]]),
-                    "token_count": 4,
-                },
-            }
+    legacy_model = DummyModel()
+    backbone = GPSReIDBackbone(legacy_model)
+    head = GPSReIDHead(legacy_model).eval()
+    encoded = backbone.encode(
+        torch.zeros(2, 3, 4, 4),
+        label=torch.arange(2),
+        multi_view=True,
+    )
 
-        def decode(self, h, *, context, tasks):
-            return h[:, 0], context["order"]
-
-    backbone = GPSReIDBackbone(DummyModel())
-    encoded = backbone.encode(torch.zeros(2, 3, 4, 4))
-
-    assert encoded["h"].shape[1] == encoded["context"]["retained_patch_tokens"] + 1
+    assert encoded["h"].shape[1] == encoded["pstate"]["retained_patch_tokens"] + 1
     assert set(encoded["strings"]) == {"selection_map"}
     assert all(
         decode_selection_indices(row[0]) in ([0, 2], [1, 3])
         for row in encoded["strings"]["selection_map"]
     )
+    decoded = backbone.decode(
+        encoded["h"],
+        pstate=encoded["pstate"],
+        tasks=["reid"],
+    )
+    embedding = head(decoded["reid"])
+    expected = torch.cat(
+        [
+            encoded["h"][:, 0],
+            encoded["h"][:, 0] / 4,
+            encoded["h"][:, 0] / 4,
+            encoded["h"][:, 0] / 4,
+            encoded["h"][:, 0] / 4,
+        ],
+        dim=1,
+    )
+    torch.testing.assert_close(embedding, expected)
 
 
 def test_gps_config_uses_worktree_dotenv(monkeypatch, tmp_path):
@@ -151,3 +190,14 @@ def test_gps_config_uses_worktree_dotenv(monkeypatch, tmp_path):
 
     assert config.data_root == str(project_root / "data")
     assert config.checkpoint == str(project_root / "weights/model.pth")
+
+
+def test_reid_output_order_is_derived_from_batch_metadata():
+    query_meta = {"pid": (7, 7, 7, 9, 9, 9)}
+    gallery_meta = {"pid": (7, 8, 9)}
+
+    assert _output_order(query_meta, "query").tolist() == [0, 3]
+    assert _output_order(gallery_meta, "gallery").tolist() == [0, 1, 2]
+
+    with pytest.raises(ValueError, match="one vehicle identity"):
+        _output_order({"pid": (7, 8, 7)}, "query")

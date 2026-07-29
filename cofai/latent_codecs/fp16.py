@@ -46,7 +46,6 @@ class FP16Codec(nn.Module):
             "pstate": {
                 "fp16_shape": tuple(int(value) for value in h.shape),
                 "fp16_output_dtype": _DTYPE_TO_NAME[h.dtype],
-                "fp16_output_device": str(h.device),
                 "fp16_token_res": token_res,
             },
         }
@@ -97,7 +96,7 @@ class FP16Codec(nn.Module):
             output_dtype = _NAME_TO_DTYPE[dtype_name]
         except KeyError as exc:
             raise ValueError(f"unsupported FP16 output dtype: {dtype_name!r}") from exc
-        output_device = kwargs.get("device", pstate["fp16_output_device"])
+        output_device = kwargs.get("device", "cpu")
         h_hat = h_hat.to(device=output_device, dtype=output_dtype)
         return {"h_hat": h_hat}
 

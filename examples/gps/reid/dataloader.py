@@ -31,16 +31,16 @@ class GPSDataLoaders:
 
 def val_collate_fn(batch):
     imgs, pids, camids, viewids, sceneids, img_paths = zip(*batch)
-    viewids = torch.tensor(viewids, dtype=torch.int64)
-    camids_batch = torch.tensor(camids, dtype=torch.int64)
     return (
         torch.stack(imgs, dim=0),
-        pids,
-        camids,
-        camids_batch,
-        viewids,
-        sceneids,
-        img_paths,
+        {
+            "pid": pids,
+            "camid": camids,
+            "camera_label": torch.tensor(camids, dtype=torch.int64),
+            "view_label": torch.tensor(viewids, dtype=torch.int64),
+            "sceneid": sceneids,
+            "img_path": img_paths,
+        },
     )
 
 

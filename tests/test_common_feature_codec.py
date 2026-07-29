@@ -13,13 +13,24 @@ class _SplitBackbone(nn.Module):
     def encode(self, x, **kwargs):
         return {
             "h": x,
-            "context": {"bias": 0.25},
+            "pstate": {"bias": 0.25},
+            "meta": {"order": torch.arange(x.shape[0])},
             "strings": {"selection_map": [[b"map"] for _ in range(x.shape[0])]},
-            "bits": {"selection_map": float(x.shape[0] * len(b"map") * 8)},
         }
 
-    def decode(self, h, *, context, tasks, **kwargs):
-        return {"reid": h + context["bias"]}
+    def decode(self, h, *, pstate, meta, tasks, **kwargs):
+        return {
+            "reid": h + pstate["bias"],
+            "order": meta["order"],
+        }
+
+
+class _PlainBackbone(nn.Module):
+    def encode(self, x):
+        return x
+
+    def decode(self, h, *, tasks):
+        return {"reid": h}
 
 
 def test_fp16_codec_round_trip_uses_real_wire_bytes():
@@ -32,6 +43,7 @@ def test_fp16_codec_round_trip_uses_real_wire_bytes():
     coded = codec.compress(h)
 
     assert set(coded["strings"]) == {"fp16"}
+    assert "fp16_output_device" not in coded["pstate"]
     assert isinstance(coded["strings"]["fp16"][0][0], bytes)
     assert len(coded["strings"]["fp16"][0][0]) == h.numel() * 2
     h_hat = codec.decompress(**coded)["h_hat"]
@@ -53,9 +65,12 @@ def test_common_model_flattens_codec_and_selection_streams():
 
     coded = model.compress(h, tasks=["reid"])
 
+    assert set(coded) == {"strings", "pstate", "meta"}
     assert set(coded["strings"]) == {"fp16", "selection_map"}
     assert "codec" not in coded["strings"]
     assert "pre_process" not in coded["strings"]
+    assert set(coded["meta"]) == {"order"}
+    assert "bias" in coded["pstate"]
     bits = _bits_from_coded_unit(coded)
     assert bits["fp16"] == h.numel() * 16
     assert bits["selection_map"] == h.shape[0] * len(b"map") * 8
@@ -63,6 +78,7 @@ def test_common_model_flattens_codec_and_selection_streams():
     decoded = model.decompress(coded, tasks=["reid"])
     expected = h.to(torch.float16).to(h.dtype) + 0.25
     torch.testing.assert_close(decoded["reid"], expected, rtol=0, atol=0)
+    torch.testing.assert_close(decoded["order"], torch.arange(h.shape[0]))
 
 
 def test_common_model_estimated_path_counts_all_flat_streams():
@@ -79,6 +95,24 @@ def test_common_model_estimated_path_counts_all_flat_streams():
         "selection_map": float(h.shape[0] * len(b"map") * 8),
     }
     assert decoded["reid"].shape == h.shape
+
+
+def test_common_model_accepts_documented_plain_backbone_protocol():
+    h = torch.randn(1, 2, 3)
+    model = CommonFeatureCodecModel(
+        backbone=_PlainBackbone(),
+        codec=FP16Codec(),
+    )
+
+    coded, decoded = model.forward_test(h, tasks=["reid"])
+
+    assert coded["bits"] == {"fp16": float(h.numel() * 16)}
+    torch.testing.assert_close(
+        decoded["reid"],
+        h.to(torch.float16).to(h.dtype),
+        rtol=0,
+        atol=0,
+    )
 
 
 def test_common_model_leaves_post_process_unimplemented():

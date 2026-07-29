@@ -17,8 +17,8 @@ GPS 的公共实现位于 `cofai/token_grouping/` 和
 GPSReIDBackbone.encode（内部执行多层 GPS）
 → FP16Codec
 → post_process=None（预留变量，当前直接透传）
-→ GPSReIDBackbone.decode
-→ 原 ReID embedding head
+→ GPSReIDBackbone.decode（尾部 Transformer）
+→ GPSReIDHead（原 bottleneck 与 embedding 拼接）
 ```
 
 GPS 必须在多个 Transformer 层内部读取 attention，因此它属于 backbone
@@ -26,6 +26,19 @@ encoder 的组成部分，不能被提取成一次性的串行预处理。当前
 直接消费 compact token sequence，不需要恢复成完整二维 token 网格。
 `post_process` 仅保留为空变量；稠密恢复应等待相应算法和下游任务实现，
 本集成不假设其形式或插入位置。
+
+`CommonFeatureCodecModel` 不引入另一套公共接口。普通 backbone 的 `encode`
+仍可只返回特征张量；GPS adapter 因为还产生 selection map，可在 `h` 之外
+附带框架已经定义的 `strings`、`pstate` 和可选 `meta`。最终 `compress`
+输出仍是文档规定的 CodedUnit：
+
+```python
+coded_unit = {"strings": ..., "pstate": ..., "meta": ...}  # meta 可省略
+```
+
+ReID 的 `pid`、`camid`、图像路径和三视角分组关系属于数据 batch meta。
+GPS encoder 内部生成的 `lsort` 只用于特征分组，不进入 Feature DU；
+evaluator 从 collate 后的 batch meta 推导 grouped embedding 对应的样本。
 
 特征码流使用真实 `FP16Codec` 序列化，包括一个 CLS token 和全部 retained
 patch tokens。码流保持 eval 引擎现有的扁平结构：

@@ -2,43 +2,83 @@
 
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
 
 from cofai.token_codecs import encode_selection_indices
+from examples.gps.reid.head import GPSReIDFeatures
+
+from .utils import shuffle_unit
 
 
 class GPSReIDBackbone(nn.Module):
     """Expose the legacy GPS model through a DINO-like encode/decode boundary.
 
-    GPS grouping remains inside ``model.encode`` because it is interleaved with
-    several Transformer blocks. The adapter only serializes the final selection
-    map as side information; it does not move or rename checkpointed modules.
+    GPS grouping remains inside the Transformer encoder because it is interleaved
+    with several blocks. The final selection map is a transmitted rate-only stream:
+    the current compact-token ReID decoder does not consume it.
     """
 
     def __init__(self, model: nn.Module):
         super().__init__()
-        self.model = model
+        self.base = model.base
+        self.global_decoder = model.b1
+        self.local_decoder = model.b2
+        self.cls_token_num = int(model.cls_token_num)
+        self.shuffle_groups = int(model.shuffle_groups)
+        self.shift_num = int(model.shift_num)
+        self.divide_length = int(model.divide_length)
+        self.rearrange = bool(model.rearrange)
 
     @property
     def patches_per_view(self) -> int:
         """Return the spatial token count produced for one input view."""
-        return int(self.model.base.patch_embed.num_patches)
+        return int(self.base.patch_embed.num_patches)
 
     @property
     def token_grouper(self):
         """Return the grouping callable used inside the GPS Transformer."""
-        return self.model.base.token_grouper
+        return self.base.token_grouper
 
     @token_grouper.setter
     def token_grouper(self, grouper) -> None:
-        self.model.base.token_grouper = grouper
+        self.base.token_grouper = grouper
 
-    def encode(self, x, **kwargs):
-        encoded = self.model.encode(x, **kwargs)
-        h = encoded["h"]
-        context = dict(encoded["context"])
+    def encode(
+        self,
+        x,
+        label=None,
+        cam_label=None,
+        view_label=None,
+        multi_view=False,
+        flip_view=False,
+        extra_token=False,
+        dataset_name="train",
+        **kwargs,
+    ):
+        if multi_view:
+            h, _order, _flops, selection = self.base(
+                x,
+                cam_label=cam_label,
+                view_label=view_label,
+                label=label,
+                multi_view=True,
+                flip_view=flip_view,
+                extra_token=extra_token,
+                dataset_name=dataset_name,
+            )
+        else:
+            h = self.base(
+                x,
+                cam_label=cam_label,
+                view_label=view_label,
+                label=label,
+                multi_view=False,
+                extra_token=extra_token,
+                dataset_name=dataset_name,
+            )
+            selection = None
 
-        selection = encoded.get("selection")
         if selection is None:
             raise RuntimeError(
                 "GPS encoder did not expose a final token-selection map; "
@@ -54,38 +94,67 @@ class GPSReIDBackbone(nn.Module):
             )
 
         strings: dict[str, list[list[bytes]]] = {}
-        bits: dict[str, float] = {}
         is_pruned = indices.shape[1] < token_count
         if is_pruned:
             rows = []
-            total_bits = 0
             for values in indices.detach().cpu().tolist():
                 payload = encode_selection_indices(values, token_count).to_bytes()
                 rows.append([payload])
-                total_bits += len(payload) * 8
             strings["selection_map"] = rows
-            bits["selection_map"] = float(total_bits)
 
-        context.update(
-            {
+        return {
+            "h": h,
+            "strings": strings,
+            "pstate": {
+                "extra_token": bool(extra_token),
                 "original_patch_tokens": token_count,
                 "retained_patch_tokens": int(indices.shape[1]),
                 "feature_dimension": int(h.shape[-1]),
-            }
-        )
-        return {
-            "h": h,
-            "context": context,
-            "strings": strings,
-            "bits": bits,
+            },
         }
 
-    def decode(self, h, *, context, tasks, **kwargs):
-        output = self.model.decode(h, context=context, tasks=tasks)
-        if self.model.training:
-            return {"reid": output}
-        feature, order = output
+    def decode(self, h, *, pstate, tasks, **kwargs):
+        if "reid" not in tasks:
+            return {}
+
+        batch_size = h.shape[0]
+        global_tokens = self.global_decoder(h)
+        extra_token = bool(pstate.get("extra_token", False))
+        if extra_token:
+            global_feature = global_tokens[:, : self.cls_token_num].reshape(
+                batch_size, -1
+            )
+            cls_token_num = self.cls_token_num
+            bottleneck_global_feature = global_tokens[:, 0]
+        else:
+            global_feature = global_tokens[:, 0]
+            cls_token_num = 1
+            bottleneck_global_feature = global_feature
+
+        patch_length = (h.size(1) - cls_token_num) // self.divide_length
+        cls_tokens = h[:, :cls_token_num]
+        if self.rearrange:
+            patch_tokens = shuffle_unit(
+                h,
+                self.shift_num,
+                self.shuffle_groups,
+                cls_token_num,
+            )
+        else:
+            patch_tokens = h[:, cls_token_num:]
+
+        local_token_features = []
+        for index in range(4):
+            start = index * patch_length
+            local_tokens = patch_tokens[:, start : start + patch_length]
+            local_token_features.append(
+                self.local_decoder(torch.cat((cls_tokens, local_tokens), dim=1))
+            )
+
         return {
-            "reid": feature,
-            "order": order,
+            "reid": GPSReIDFeatures(
+                global_feature=global_feature,
+                bottleneck_global_feature=bottleneck_global_feature,
+                local_token_features=tuple(local_token_features),
+            ),
         }

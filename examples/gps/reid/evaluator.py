@@ -13,6 +13,22 @@ from cofai.models import CommonFeatureCodecModel
 from .metrics import R1_mAP_eval
 
 
+def _output_order(batch_meta, dataset_name: str) -> np.ndarray:
+    """Map grouped GPS embeddings back to dataset-level batch metadata."""
+    pids = np.asarray(batch_meta["pid"])
+    views_per_group = 3 if dataset_name == "query" else 1
+    if pids.size % views_per_group:
+        raise ValueError(
+            f"{dataset_name} batch size must be divisible by {views_per_group}"
+        )
+    groups = np.arange(pids.size).reshape(-1, views_per_group)
+    if views_per_group > 1 and not np.all(
+        pids[groups] == pids[groups][:, :1]
+    ):
+        raise ValueError("each GPS query group must contain one vehicle identity")
+    return groups[:, 0]
+
+
 def evaluate_model(
     cfg,
     model,
@@ -36,11 +52,19 @@ def evaluate_model(
             (query_loader, "query"),
             (gallery_loader, "gallery"),
         ):
-            for img, pid, camid, camids, view, _sceneid, _path in loader:
+            for img, batch_meta in loader:
                 img = img.to(device, non_blocking=True)
+                pid = batch_meta["pid"]
+                camid = batch_meta["camid"]
                 model_kwargs = {
-                    "cam_label": camids.to(device, non_blocking=True),
-                    "view_label": view.to(device, non_blocking=True),
+                    "cam_label": batch_meta["camera_label"].to(
+                        device,
+                        non_blocking=True,
+                    ),
+                    "view_label": batch_meta["view_label"].to(
+                        device,
+                        non_blocking=True,
+                    ),
                     "label": torch.as_tensor(pid, dtype=torch.long, device=device),
                     "multi_view": True,
                     "flip_view": False,
@@ -58,15 +82,14 @@ def evaluate_model(
                             **model_kwargs,
                         )
                     feature = task_outputs["reid"]
-                    order = task_outputs["order"]
                     if dataset_name == "query":
                         for name, value in _bits_from_coded_unit(coded).items():
                             rate_bits[name] = rate_bits.get(name, 0.0) + float(value)
                         coded_groups += int(feature.shape[0])
                 else:
-                    feature, order = model(img, **model_kwargs)
+                    feature, _model_order = model(img, **model_kwargs)
 
-                order = order.detach().cpu().numpy()
+                order = _output_order(batch_meta, dataset_name)
                 evaluator.update(
                     (
                         feature,

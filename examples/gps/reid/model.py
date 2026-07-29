@@ -3,29 +3,7 @@ import torch.nn as nn
 import copy
 
 from .backbone.vit_pytorch import vit_base_patch16_224_TransReID_seq
-
-
-def shuffle_unit(features, shift, group, begin=1):
-
-    batchsize = features.size(0)
-    dim = features.size(-1)
-    # Shift Operation
-    feature_random = torch.cat(
-        [features[:, begin - 1 + shift :], features[:, begin : begin - 1 + shift]],
-        dim=1,
-    )
-    x = feature_random
-    # Patch Shuffle Operation
-    if x.size(1) == 0:
-        raise RuntimeError("shuffle_unit received no patch tokens")
-    while x.size(1) % group != 0:
-        x = torch.cat([x, x[:, -1:, :]], dim=1)
-    x = x.view(batchsize, group, -1, dim)
-
-    x = torch.transpose(x, 1, 2).contiguous()
-    x = x.view(batchsize, -1, dim)
-
-    return x
+from .backbone.utils import shuffle_unit
 
 
 def weights_init_kaiming(m):
