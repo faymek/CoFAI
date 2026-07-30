@@ -20,7 +20,6 @@ CoFAI currently provides:
 - [cofai.backbone](./api/backbone.md)
 - [cofai.latent_codecs](./api/latent_codecs.md)
 - [cofai.index_codecs](./api/index_codecs.md)
-- [cofai.token_codecs](./api/token_codecs.md)
 - [cofai.layers](./api/layers.md)
 - [cofai.datasets](./api/datasets.md)
 - [cofai.losses](./api/losses.md)

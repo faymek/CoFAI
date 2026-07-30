@@ -4,7 +4,7 @@ import torch
 from compressai.entropy_models import GaussianConditional
 
 
-class NaiveCodec:
+class FixedGaussianCodec:
     """
     A simple "model-free" compressor for continuous features.
 
@@ -71,4 +71,3 @@ class NaiveCodec:
         total_bits = total_bytes * 8
         features_hat = self.decompress(strings, shape)
         return features_hat, total_bits
-
