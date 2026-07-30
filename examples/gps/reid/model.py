@@ -3,7 +3,7 @@ import copy
 import torch
 import torch.nn as nn
 
-from cofai.backbone.gps_transreid_vit import build_gps_transreid_vit
+from cofai.backbone.gps_transreid import build_gps_transreid_vit
 
 
 def _make_bottleneck() -> nn.BatchNorm1d:

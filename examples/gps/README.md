@@ -94,8 +94,7 @@ CoFAI/
 ```text
 cofai/
 ├── backbone/
-│   ├── gps_transreid.py                # CoFAI GPS TransReID backbone 边界
-│   └── gps_transreid_vit.py            # GPS 多视角 ViT 实现
+│   └── gps_transreid.py                # GPS 多视角 ViT 与 CoFAI backbone 边界
 ├── heads/
 │   └── gps_transreid.py                # GPS TransReID embedding head
 ├── models/
