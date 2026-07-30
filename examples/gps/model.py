@@ -5,7 +5,7 @@ from __future__ import annotations
 from omegaconf import OmegaConf
 
 from cofai.backbone import GPSTransReIDBackbone
-from cofai.heads import GPSTransReIDHead
+from cofai.heads import TransReIDJPMHead
 from cofai.models import CommonFeatureCodecModel
 from examples.gps.reid.model import build_checkpoint_modules
 
@@ -27,7 +27,7 @@ def build_codec_model(
         checkpoint_modules.b1,
         checkpoint_modules.b2,
     )
-    reid_head = GPSTransReIDHead(
+    reid_head = TransReIDJPMHead(
         checkpoint_modules.bottleneck,
         [
             checkpoint_modules.bottleneck_1,

@@ -5,7 +5,7 @@ import torch
 from types import SimpleNamespace
 
 from cofai.backbone import GPSTransReIDBackbone
-from cofai.heads import GPSTransReIDHead
+from cofai.heads import TransReIDJPMHead
 from cofai.index_codecs import (
     AdaptiveBitmapIndexCodec,
     EncodedIndexSet,
@@ -167,7 +167,7 @@ def test_gps_backbone_emits_raw_index_set_and_keeps_cls():
         torch.nn.Identity(),
         torch.nn.Identity(),
     )
-    head = GPSTransReIDHead(
+    head = TransReIDJPMHead(
         torch.nn.Identity(),
         [torch.nn.Identity() for _ in range(4)],
         neck_feature="before",

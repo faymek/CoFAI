@@ -15,8 +15,8 @@ from cofai.token_grouping import GPSTokenGrouper
 
 
 @dataclass(frozen=True)
-class GPSTransReIDFeatures:
-    """Task features emitted by the GPS TransReID decoder."""
+class TransReIDJPMFeatures:
+    """Global and local features consumed by a TransReID JPM head."""
 
     global_feature: torch.Tensor
     bottleneck_global_feature: torch.Tensor
@@ -133,7 +133,7 @@ class GPSTransReIDBackbone(nn.Module):
             )
 
         return {
-            "reid": GPSTransReIDFeatures(
+            "reid": TransReIDJPMFeatures(
                 global_feature=global_feature,
                 bottleneck_global_feature=global_feature,
                 local_token_features=tuple(local_token_features),

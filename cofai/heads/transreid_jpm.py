@@ -1,14 +1,14 @@
-"""Embedding head for the released GPS TransReID checkpoint."""
+"""Embedding head for the TransReID JPM evaluation path."""
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
-from cofai.backbone.gps_transreid import GPSTransReIDFeatures
+from cofai.backbone.gps_transreid import TransReIDJPMFeatures
 
 
-class GPSTransReIDHead(nn.Module):
+class TransReIDJPMHead(nn.Module):
     """Apply the released TransReID bottlenecks and embedding concatenation."""
 
     def __init__(
@@ -23,21 +23,19 @@ class GPSTransReIDHead(nn.Module):
         self.bottleneck = bottleneck
         self.local_bottlenecks = nn.ModuleList(local_bottlenecks)
         if len(self.local_bottlenecks) != 4:
-            raise ValueError(
-                "the released GPS TransReID head requires four local bottlenecks"
-            )
+            raise ValueError("the TransReID JPM head requires four local bottlenecks")
 
-    def forward(self, features: GPSTransReIDFeatures) -> torch.Tensor:
-        if not isinstance(features, GPSTransReIDFeatures):
+    def forward(self, features: TransReIDJPMFeatures) -> torch.Tensor:
+        if not isinstance(features, TransReIDJPMFeatures):
             raise TypeError(
-                "GPSTransReIDHead expects GPSTransReIDFeatures from "
+                "TransReIDJPMHead expects TransReIDJPMFeatures from "
                 "GPSTransReIDBackbone.decode"
             )
         if self.training:
-            raise RuntimeError("GPSTransReIDHead is an evaluation-only embedding head")
+            raise RuntimeError("TransReIDJPMHead is an evaluation-only embedding head")
         if len(features.local_token_features) != len(self.local_bottlenecks):
             raise ValueError(
-                "GPS TransReID backbone and head must expose four local branches"
+                "TransReID JPM features and head must expose four local branches"
             )
 
         global_bn = self.bottleneck(features.bottleneck_global_feature)

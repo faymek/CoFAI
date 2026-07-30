@@ -6,7 +6,7 @@
 2. AI M2460：Token Grouping 的真实原生 dtype 码率和结构侧信息评估。
 
 GPS 的公共组件位于 `cofai/backbone/gps_transreid.py`、
-`cofai/heads/gps_transreid.py`、`cofai/token_grouping/` 和
+`cofai/heads/transreid_jpm.py`、`cofai/token_grouping/` 和
 `cofai/index_codecs/`。数据集、checkpoint 适配和任务评估代码仅服务于
 本示例，位于 `examples/gps/reid/`。
 
@@ -20,7 +20,7 @@ GPSTransReIDBackbone.encode（内部执行多层 GPS）
 └─ selection indices → AdaptiveBitmapIndexCodec
 → post_process=None（预留变量，当前直接透传）
 → GPSTransReIDBackbone.decode（TransReID 全局与 JPM 局部分支）
-→ GPSTransReIDHead（原 bottleneck 与 embedding 拼接）
+→ TransReIDJPMHead（原 bottleneck 与 embedding 拼接）
 ```
 
 GPS 必须在多个 Transformer 层内部读取 attention，因此它属于 backbone
@@ -96,7 +96,7 @@ cofai/
 ├── backbone/
 │   └── gps_transreid.py                # GPS 多视角 ViT 与 CoFAI backbone 边界
 ├── heads/
-│   └── gps_transreid.py                # GPS TransReID embedding head
+│   └── transreid_jpm.py                # TransReID JPM embedding head
 ├── models/
 │   └── common.py                       # 探索性 CommonFeatureCodecModel
 ├── latent_codecs/

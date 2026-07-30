@@ -1,6 +1,6 @@
 from .base import BackboneProtocol
 from .frozen_tail import Dinov3FrozenTail, FrozenTail
-from .gps_transreid import GPSTransReIDBackbone, GPSTransReIDFeatures
+from .gps_transreid import GPSTransReIDBackbone, TransReIDJPMFeatures
 from .tokenizer import VqganBackbone
 from .timm import (
     Dinov2TimmBackbone,
@@ -22,7 +22,7 @@ __all__ = [
     "FrozenTail",
     "Dinov3FrozenTail",
     "GPSTransReIDBackbone",
-    "GPSTransReIDFeatures",
+    "TransReIDJPMFeatures",
     "VqganBackbone",
     "Dinov2TimmBackbone",
     "Dinov3TimmBackbone",
