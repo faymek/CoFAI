@@ -3,7 +3,7 @@ import tempfile
 import torch.nn as nn
 import torch
 
-from cofai.token_codecs import NaiveCodec
+from cofai.latent_codecs import FixedGaussianCodec
 from cofai.latent_codecs.hm_sandwitch import HMCodecFFmpeg
 
 from cofai.models.cavc.sandwich_with_feature import CondTCM
@@ -40,7 +40,7 @@ class CAVCodec(nn.Module):
         self.vgg = VGGBackbone(device)
         self.mix_projector = MixFeatureProjector(prompt_dim, feature_dim, compress_feature_dim)
         self.sandwich = CondTCM(**cond_tcm)
-        self.gauss = NaiveCodec(fixed_scale)
+        self.gauss = FixedGaussianCodec(fixed_scale)
         self.ffmpeg = HMCodecFFmpeg(ffmpeg_path, ffmpeg_verbose)
         self.video_writer = VideoWriterWrapper()
         self.transform = transforms.Compose([

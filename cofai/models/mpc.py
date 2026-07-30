@@ -5,7 +5,7 @@ from compressai.models.base import CompressionModel
 from compressai.models.utils import conv
 
 from cofai.backbone import *
-from cofai.token_codecs.base import UniformTokenCodec
+from cofai.index_codecs import UniformIndexCodec
 from cofai.latent_codecs.vit_feature_codec import (
     VitUnionLatentCodec,
     VitUnionLatentCodecWithCtx,
@@ -31,7 +31,7 @@ class MPC_I1(CompressionModel):
 
     Attributes:
         vqgan (VqganBackbone): The VQGAN backbone model.
-        vqgan_codec (UniformTokenCodec): The uniform token codec for compression.
+        vqgan_codec (UniformIndexCodec): The uniform index codec for compression.
         patch_size (int): Patch size used by the model (fixed at 16).
     """
 
@@ -432,7 +432,7 @@ class MPC_I12(CompressionModel):
         vqgan_backbone (dict): Configuration dictionary for the VQGAN backbone.
             Passed directly to VqganBackbone constructor.
         vqgan_codec (dict): Configuration dictionary for the VQGAN codec.
-            Passed directly to UniformTokenCodec constructor.
+            Passed directly to UniformIndexCodec constructor.
         dino_backbone (dict): Configuration dictionary for the DINOv2 backbone.
             Passed directly to Dinov2TimmBackbone constructor.
         dino_codec (dict): Configuration dictionary for the DINO codec.
@@ -442,7 +442,7 @@ class MPC_I12(CompressionModel):
 
     Attributes:
         vqgan (VqganBackbone): The VQGAN backbone model.
-        vqgan_codec (UniformTokenCodec): The VQGAN codec.
+        vqgan_codec (UniformIndexCodec): The VQGAN codec.
         dino (Dinov2TimmBackbone): The DINOv2 backbone model.
         dino_codec (VitUnionLatentCodecWithCtx): The DINO codec with context.
         patch_size (int): Patch size used by the DINOv2 backbone.
@@ -461,7 +461,7 @@ class MPC_I12(CompressionModel):
     ):
         super().__init__()
         self.vqgan = VqganBackbone(vqgan_backbone)
-        self.vqgan_codec = UniformTokenCodec(**vqgan_codec)
+        self.vqgan_codec = UniformIndexCodec(**vqgan_codec)
         self.dino = Dinov2TimmBackbone(**dino_backbone)
         self.dino_codec = VitUnionLatentCodecWithCtx(**dino_codec)
         self.patch_size = self.dino.patch_size
@@ -807,7 +807,7 @@ class MPC_I12_CtxAsHyper(CompressionModel):
         vqgan_backbone (dict): Configuration dictionary for the VQGAN backbone.
             Passed directly to VqganBackbone constructor.
         vqgan_codec (dict): Configuration dictionary for the VQGAN codec.
-            Passed directly to UniformTokenCodec constructor.
+            Passed directly to UniformIndexCodec constructor.
         dino_backbone (dict): Configuration dictionary for the DINOv2 backbone.
             Passed directly to Dinov2TimmBackbone constructor.
         dino_codec (dict): Configuration dictionary for the DINO codec.
@@ -817,7 +817,7 @@ class MPC_I12_CtxAsHyper(CompressionModel):
 
     Attributes:
         vqgan (VqganBackbone): The VQGAN backbone model.
-        vqgan_codec (UniformTokenCodec): The VQGAN codec.
+        vqgan_codec (UniformIndexCodec): The VQGAN codec.
         dino (Dinov2TimmBackbone): The DINOv2 backbone model.
         dino_codec (VitUnionLatentCodecCtxAsHyper): The DINO codec with context as hyperprior.
         patch_size (int): Patch size used by the DINOv2 backbone.
@@ -835,7 +835,7 @@ class MPC_I12_CtxAsHyper(CompressionModel):
     ):
         super().__init__()
         self.vqgan = VqganBackbone(vqgan_backbone)
-        self.vqgan_codec = UniformTokenCodec(**vqgan_codec)
+        self.vqgan_codec = UniformIndexCodec(**vqgan_codec)
         self.dino = Dinov2TimmBackbone(**dino_backbone)
         self.dino_codec = VitUnionLatentCodecCtxAsHyper(**dino_codec)
         self.patch_size = self.dino.patch_size

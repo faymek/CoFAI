@@ -1,18 +1,19 @@
 import torch
 from compressai.models.base import CompressionModel
+
 from cofai.utils.coder import encode_uniform_to_bits, decode_uniform_from_bits
 
-class UniformTokenCodec(CompressionModel):
-    """Uniform token codec for compression.
-    
+
+class UniformIndexCodec(CompressionModel):
+    """Encode discrete indices under a uniform alphabet model.
+
     This codec assumes a uniform distribution over the alphabet and encodes
-    tokens using uniform quantization. It extends CompressionModel to provide
-    compression and decompression functionality for discrete tokens.
+    integer indices using the repository's uniform arithmetic-coding helpers.
     """
-    
+
     def __init__(self, alphabet_size, **kwargs):
-        """Initialize the uniform token codec.
-        
+        """Initialize the uniform index codec.
+
         Args:
             alphabet_size (int): Size of the token alphabet (number of possible values).
             **kwargs (dict): Additional keyword arguments passed to parent class.
@@ -22,10 +23,10 @@ class UniformTokenCodec(CompressionModel):
 
     def forward(self, tokens):
         """Forward pass to compute uniform likelihoods.
-        
+
         Args:
             tokens (torch.Tensor): Input tokens of any shape.
-        
+
         Returns:
             output (dict): Dictionary containing:
                 - "likelihoods" (dict): Dictionary with key "t" containing uniform
@@ -39,10 +40,10 @@ class UniformTokenCodec(CompressionModel):
 
     def _uniform_likelihood(self, tokens):
         """Compute uniform likelihoods for tokens.
-        
+
         Args:
             tokens (torch.Tensor): Input tokens of any shape.
-        
+
         Returns:
             likelihoods (torch.Tensor): Uniform likelihoods of shape matching tokens,
                 where each element is 1.0 / alphabet_size.
@@ -53,13 +54,13 @@ class UniformTokenCodec(CompressionModel):
 
     def compress(self, tokens):
         """Compress tokens to bitstring.
-        
+
         Note: tokens should not have batch dimension.
-        
+
         Args:
             tokens (torch.Tensor): Input tokens to compress. Shape should be
                 (H, W, ...) without batch dimension.
-        
+
         Returns:
             coded_unit (dict): Dictionary containing:
 
@@ -77,14 +78,14 @@ class UniformTokenCodec(CompressionModel):
 
     def decompress(self, strings, pstate, **kwargs):
         """Decompress bitstring to tokens.
-        
+
         Args:
             strings (dict): Dictionary with key "t" containing nested list with
                 encoded bitstring. Nested structure is for consistent API.
             pstate (dict): Dictionary with key "t_shape" containing the original
                 shape of tokens as a tuple.
             **kwargs (dict): Additional keyword arguments (unused).
-        
+
         Returns:
             task_feats (dict): Dictionary with key "tokens" containing decompressed
                 tokens of shape specified in pstate["t_shape"]. Note: tokens

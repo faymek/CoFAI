@@ -7,6 +7,7 @@ from .bypass import BypassLatentCodec
 from .vqfc import VQFeatureCodec
 from .orfc import OrthoRotationFeatureCodec
 from .raw_dtype import RawDtypeCodec
+from .fixed_gaussian import FixedGaussianCodec
 
 __all__ = [
     "FeatureScaleHyperprior",
@@ -14,6 +15,7 @@ __all__ = [
     "VQFeatureCodec",
     "OrthoRotationFeatureCodec",
     "RawDtypeCodec",
+    "FixedGaussianCodec",
     "VitUnionLatentCodec",
     "VitUnionLatentCodecWithCtx",
     "VitSeparateLatentCodec",
