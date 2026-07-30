@@ -23,3 +23,4 @@ weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth  sha256:e89316
 # --- VTC 编解码器权重 ---
 weights/VTC/dinov3-vitl16-slot-1--VTC.pth.tar  sha256:0585e23d
 weights/VTC/dinov3-vitl16-slot-1--VTC-vbr.pth.tar  sha256:e7322ae3
+weights/VTC/dinov3-vitl16-slot24--VTC-vbr.pth.tar  sha256:8cd3866b
