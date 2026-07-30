@@ -1,0 +1,36 @@
+name: VeRi
+description: GPS multi-view evaluation on VeRi-776
+data_root: ${project_root:}/data
+checkpoint: ${project_root:}/weights/gps/VeRi/transformer.pth
+codec_model:
+  type: cofai.models.CommonFeatureCodecModel
+  codec:
+    type: cofai.latent_codecs.RawDtypeCodec
+    dtype: float16
+  index_codecs:
+    selection_map:
+      type: cofai.index_codecs.AdaptiveBitmapIndexCodec
+  post_process: null
+dataset:
+  name: veri
+model:
+  image_size: [256, 256]
+  stride_size: [12, 12]
+  sie_camera: true
+  sie_view: true
+  sie_coefficient: 3.0
+  drop_path: 0.1
+  dropout: 0.0
+  attention_dropout: 0.0
+  pruning_layers: [7, 8]
+  pruning_ratios: [0.2, 0.2]
+  propagation_max_iter: 10
+  beta: 0.1
+  neck_feature: before
+  pixel_mean: [0.5, 0.5, 0.5]
+  pixel_std: [0.5, 0.5, 0.5]
+evaluation:
+  batch_size: 96
+  workers: 8
+  feature_normalize: true
+  reranking: false

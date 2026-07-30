@@ -12,6 +12,7 @@ nav = [
     "api/models.md",
     "api/backbone.md",
     "api/latent_codecs.md",
+    "api/index_codecs.md",
     "api/token_codecs.md",
     "api/heads.md",
     "api/layers.md",
