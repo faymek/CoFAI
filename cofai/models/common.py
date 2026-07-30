@@ -36,9 +36,14 @@ def _merge_unique(target: dict, source: dict, *, kind: str) -> None:
 class CommonFeatureCodecModel(CompressionModel):
     """Compose a split backbone, a feature codec, and optional task heads.
 
-    This model intentionally exists in parallel with ``DinoFeatureCodecModel``.
-    It is an exploratory integration point for algorithms whose encoder already
-    performs feature restructuring, such as GPS token grouping.
+    This model explores a feature-coding template for methods that involve token
+    grouping and eventual decoded-token post-processing. The current implementation
+    is only an integration demo compatible with the M2460 GPS proposal, not a stable
+    public abstraction. Its interface and component boundaries may change
+    substantially as related proposals evolve.
+
+    It intentionally exists in parallel with ``DinoFeatureCodecModel``. Algorithms
+    such as GPS may perform feature restructuring inside the backbone encoder.
 
     A standard backbone encoder may return only its feature tensor. A backbone that
     also selects bounded discrete indices may return ``h``, ``pstate``, and an
