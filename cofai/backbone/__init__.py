@@ -1,4 +1,8 @@
 from .base import BackboneProtocol
+from .frozen_tail import (
+    Dinov3FrozenTail,
+    FrozenTail,
+)
 from .tokenizer import VqganBackbone
 from .timm import (
     Dinov2TimmBackbone,
@@ -17,6 +21,8 @@ from .qwen3vl import Qwen3VLBackbone
 
 __all__ = [
     "BackboneProtocol",
+    "FrozenTail",
+    "Dinov3FrozenTail",
     "VqganBackbone",
     "Dinov2TimmBackbone",
     "Dinov3TimmBackbone",

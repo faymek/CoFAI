@@ -22,11 +22,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 PROJECT_ROOT = os.getenv("PROJECT_ROOT", os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
 
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "cofai", "entropy_models"))
-sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, str(SOURCE_ROOT))
 
-from orfc_model import batch_normalize_gpu, batched_assign, learn_orfc_rotation
+from cofai.latent_codecs.orfc_normalization import normalize_orfc_features
+from cofai.ops.orfc import batched_assign, learn_orfc_rotation
 from utils import set_seed, preload_features
 
 import warnings
@@ -76,7 +77,7 @@ def train_and_save(args):
             np.stack(features_train[start:end])
         ).float().to(device)
         with torch.no_grad():
-            Y, _, _ = batch_normalize_gpu(X, mode='per_image')
+            Y, _, _ = normalize_orfc_features(X, mode='per_image')
         all_vectors.append(Y.reshape(-1, D).cpu().numpy())
         del X, Y
     full_vectors = np.concatenate(all_vectors, axis=0)
@@ -128,7 +129,7 @@ def train_and_save(args):
         end = min(start + 200, len(features_pmf))
         X = torch.from_numpy(np.stack(features_pmf[start:end])).float().to(device)
         with torch.no_grad():
-            Y, _, _ = batch_normalize_gpu(X, mode='per_image')
+            Y, _, _ = normalize_orfc_features(X, mode='per_image')
             flat = Y.reshape(-1, D)
             Z = flat @ R_t
             z_3d = Z.reshape(-1, num_groups, args.embedding_dim).permute(1, 0, 2).contiguous()

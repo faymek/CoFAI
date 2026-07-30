@@ -21,10 +21,12 @@ from compressai.registry import register_model
 
 from cofai.backbone import Dinov2OrgBackbone
 from cofai.engine.registry import instantiate_class
-from cofai.entropy_models.orfc_model import (
-    batch_normalize_gpu,
-    batch_inv_normalize_gpu,
+from cofai.ops.orfc import (
     batched_assign,
+)
+from cofai.latent_codecs.orfc_normalization import (
+    denormalize_orfc_features,
+    normalize_orfc_features,
 )
 
 
@@ -81,7 +83,7 @@ class _ORFCMixin:
         B, N, D = tokens.shape
         device = tokens.device
 
-        Y, mu, std = batch_normalize_gpu(tokens, mode="per_image")
+        Y, mu, std = normalize_orfc_features(tokens, mode="per_image")
 
         flat = Y.reshape(B * N, D)
         Z = flat @ self._orfc_R  # (B*N, D)
@@ -95,7 +97,7 @@ class _ORFCMixin:
 
         flat_hat = z_hat_3d.permute(1, 0, 2).reshape(B * N, D)
         Y_hat = (flat_hat @ self._orfc_R.T).reshape(B, N, D)
-        tokens_hat = batch_inv_normalize_gpu(Y_hat, mu, std)
+        tokens_hat = denormalize_orfc_features(Y_hat, mu, std)
 
         return tokens_hat, labels
 
@@ -192,7 +194,7 @@ class _ORFCMixin:
 
         Args:
             labels: (G, B*N) int64 tensor
-            mu, std: normalization stats from encode, shape (B, 1, 1)
+            mu, std: compact normalization statistics, shape (B, 1)
             B, N: batch size and token count
 
         Returns:
@@ -210,7 +212,7 @@ class _ORFCMixin:
 
         flat_hat = z_hat_3d.permute(1, 0, 2).reshape(B * N, D)
         Y_hat = (flat_hat @ self._orfc_R.T).reshape(B, N, D)
-        tokens_hat = batch_inv_normalize_gpu(Y_hat, mu, std)
+        tokens_hat = denormalize_orfc_features(Y_hat, mu, std)
         return tokens_hat
 
 
@@ -279,7 +281,7 @@ class Dinov2ClsORFC(CompressionModel, _ORFCMixin):
             h = self.dino.encode(x)  # (B, 1+HW, D)
             B, N, D = h.shape
 
-            Y, mu, std = batch_normalize_gpu(h, mode="per_image")
+            Y, mu, std = normalize_orfc_features(h, mode="per_image")
             flat = Y.reshape(B * N, D)
             Z = flat @ self._orfc_R
 
@@ -555,7 +557,7 @@ class Dinov2SlideSegORFC(CompressionModel, _ORFCMixin):
                 _B, N, D = h.shape
                 total_tokens += N
 
-                Y, mu, std = batch_normalize_gpu(h, mode="per_image")
+                Y, mu, std = normalize_orfc_features(h, mode="per_image")
                 flat = Y.reshape(N, D)
                 Z = flat @ self._orfc_R
                 z_3d = Z.reshape(N, self._orfc_num_groups, self._orfc_embedding_dim)

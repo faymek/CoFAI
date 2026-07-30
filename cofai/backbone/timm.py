@@ -26,6 +26,7 @@ Note: All backbones in this module use only timm library implementations.
 """
 
 import os
+from functools import partial
 
 import torch
 import torch.nn as nn
@@ -128,14 +129,39 @@ class Dinov2TimmBackbone(nn.Module):
         if self.with_registers:
             model_name = f"vit_{self.model_size}_patch14_reg4_dinov2.lvd142m"
 
-        feature_model = timm.create_model(
-            model_name,
-            pretrained=True,
-            img_size=self.img_size,
-            patch_size=self.patch_size,
-            drop_path_rate=0.0,
-            dynamic_img_size=self.dynamic_size,
-        )
+        if self.ckpt_path is not None:
+            from timm.models._helpers import load_checkpoint
+            from timm.models.vision_transformer import checkpoint_filter_fn
+
+            ckpt_path = os.path.expanduser(str(self.ckpt_path))
+            if not os.path.isfile(ckpt_path):
+                raise FileNotFoundError(f"Local checkpoint not found: {ckpt_path}")
+            feature_model = timm.create_model(
+                model_name,
+                pretrained=False,
+                img_size=self.img_size,
+                patch_size=self.patch_size,
+                drop_path_rate=0.0,
+                dynamic_img_size=self.dynamic_size,
+            )
+            load_checkpoint(
+                feature_model,
+                ckpt_path,
+                use_ema=False,
+                strict=True,
+                # Preserve the proposal's released non-antialiased bicubic
+                # positional-embedding resampling.
+                filter_fn=partial(checkpoint_filter_fn, antialias=False),
+            )
+        else:
+            feature_model = timm.create_model(
+                model_name,
+                pretrained=True,
+                img_size=self.img_size,
+                patch_size=self.patch_size,
+                drop_path_rate=0.0,
+                dynamic_img_size=self.dynamic_size,
+            )
         feature_model.eval()
         return feature_model
 
@@ -657,8 +683,8 @@ class Dinov3TimmBackbone(nn.Module):
         weights_tag="lvd1689m",
         return_registers=False,
         # ---- NEW: offline/local weights ----
-        ckpt_path=None,          
-        pretrained=True,        
+        ckpt_path=None,
+        pretrained=True,
     ):
         super().__init__()
 
@@ -803,6 +829,39 @@ class Dinov3TimmBackbone(nn.Module):
                     x = blk(x)
 
         return x
+
+    def build_frozen_tail(
+        self,
+        layer_idx: int,
+        token_hw: tuple[int, int],
+        device: torch.device | str,
+    ) -> nn.Module:
+        """Build the frozen tail after ``layer_idx`` with spatial RoPE primed."""
+        from .frozen_tail import Dinov3FrozenTail, FrozenTail
+
+        n_blocks = len(self.model.blocks)
+        if not -1 <= layer_idx < n_blocks:
+            raise ValueError(f"layer_idx must be in [-1, {n_blocks - 1}], got {layer_idx}")
+        if layer_idx == n_blocks - 1:
+            return FrozenTail([], self.model.norm).to(device)
+
+        self.to(device).eval()
+        height, width = token_hw
+        image = torch.zeros(
+            1,
+            3,
+            height * self.patch_size,
+            width * self.patch_size,
+            device=device,
+        )
+        with torch.no_grad():
+            self.encode(image)
+        return Dinov3FrozenTail(
+            self.model,
+            layer_idx,
+            self._rope,
+            self._attn_mask,
+        ).to(device)
 
     def decode(self, h, token_res=None, task="whole"):
         if task == "whole":

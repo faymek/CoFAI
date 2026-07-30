@@ -20,7 +20,7 @@ examples/orfc/
     └── test_seg_all.sh           # 批量分割测试
 ```
 
-核心算法：`cofai/entropy_models/orfc_model.py`
+核心数学操作：`cofai/ops/orfc.py`；在线 codec：`cofai/latent_codecs/orfc.py`。
 
 ## 下载数据与权重
 

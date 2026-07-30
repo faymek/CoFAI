@@ -4,17 +4,14 @@ from types import SimpleNamespace
 
 import torch
 
-from cofai.engine.run_eval import (
-    _bits_from_coded_unit,
-    eval_step,
-    inference_model,
-)
+from cofai.engine.bitrate import bits_from_coded_unit
+from cofai.engine.run_eval import eval_step, inference_model
 from cofai.engine.schema import EvalBatch
 
 
 def test_calc_bits_strings():
     data = {"strings": {"a": [[b"xx"]]}}
-    out = _bits_from_coded_unit(data)
+    out = bits_from_coded_unit(data)
     assert out["a"] == 16.0
 
 
@@ -31,7 +28,7 @@ def test_inference_x_real_returns_rec():
         DummyModel(), x, qp=1, real=True, tasks=["rec"]
     )
     assert "rec" in task_feats
-    assert "enc_time" in time_items
+    assert "total_enc_time" in time_items
     assert "a" in bits_items
 
 

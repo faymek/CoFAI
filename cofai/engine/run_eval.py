@@ -10,7 +10,6 @@ Multi-sample batches are not part of the supported contract.
 from __future__ import annotations
 
 import json
-import math
 import os
 import sys
 import time
@@ -25,6 +24,7 @@ from tqdm.auto import tqdm
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 from cofai.engine.builder import build_dataset, build_model, build_tasks
+from cofai.engine.bitrate import bits_from_coded_data
 from cofai.engine.config import resolve_plan, validate_plan
 from cofai.metrics.utils import DictAverageMeter
 from cofai.engine.dataloader import build_dataloader
@@ -41,65 +41,6 @@ torch.backends.cudnn.deterministic = True
 torch.set_num_threads(1)
 
 _CONF_ROOT = (Path(__file__).resolve().parents[2] / "conf").resolve()
-
-
-def _bits_from_coded_unit(data: Dict[str, Any]) -> Dict[str, float]:
-    if "strings" in data:  # real compression
-        return {
-            str(name): float(sum(len(s[0]) for s in sub_strings) * 8.0)
-            for name, sub_strings in data["strings"].items()
-        }
-    if "likelihoods" in data:
-        return {
-            str(name): float((torch.log(likelihoods).sum() / (-math.log(2))).item())
-            for name, likelihoods in data["likelihoods"].items()
-        }
-    if "bits" in data:
-        return {str(k): float(v) for k, v in data["bits"].items()}
-    raise KeyError("Expected key `strings` or `likelihoods` in out_enc.")
-
-
-def _bits_from_coded_data(out: Dict[str, Any]) -> Dict[str, float]:
-    # Back-compat: adapted CompressAI style.
-    if "type" not in out:
-        return _bits_from_coded_unit(out)
-
-    out_type = out.get("type")
-    if out_type == "unit":
-        return _bits_from_coded_unit(out["data"])
-    if out_type == "frame":
-        flat: Dict[str, float] = {}
-        for layer_name, coded_unit in out["data"].items():
-            bits_items = _bits_from_coded_unit(coded_unit)
-            for k, v in bits_items.items():
-                flat[f"{layer_name}.{k}"] = float(v)
-        return flat
-    if out_type == "frame_wise_video":
-        flat = {}
-        for frame_name, coded_frame in out["data"].items():
-            for layer_name, coded_unit in coded_frame["data"].items():
-                bits_items = _bits_from_coded_unit(coded_unit)
-                for k, v in bits_items.items():
-                    flat[f"{frame_name}.{layer_name}.{k}"] = float(v)
-        return flat
-    if out_type == "layer_wise_video":
-        flat = {}
-        for layer_name, coded_frame in out["data"].items():
-            for frame_name, coded_unit in coded_frame["data"].items():
-                bits_items = _bits_from_coded_unit(coded_unit)
-                for k, v in bits_items.items():
-                    flat[f"{layer_name}.{frame_name}.{k}"] = float(v)
-        return flat
-    if out_type == "slide_crops":
-        # Sliding-window models emit one coded_unit per crop; aggregate the bits
-        # of every crop into a single per-codec total.
-        flat = {}
-        for coded_unit in out["data"]:
-            bits_items = _bits_from_coded_unit(coded_unit)
-            for k, v in bits_items.items():
-                flat[k] = flat.get(k, 0.0) + float(v)
-        return flat
-    raise NotImplementedError(f"Unsupported type: {out_type!r}")
 
 
 @torch.inference_mode()
@@ -141,7 +82,7 @@ def inference_model(
         )
         dec_time = time.time() - t1
 
-        bits_items = _bits_from_coded_data(coded_data)
+        bits_items = bits_from_coded_data(coded_data)
         time_items = {"total_enc_time": float(enc_time), "total_dec_time": float(dec_time)}
         if profile:
             time_items.update(getattr(model, "_codec_time", {}) or {})
@@ -156,7 +97,7 @@ def inference_model(
         **codec_kw,
     )
     elapsed = time.time() - t0
-    bits_items = _bits_from_coded_data(coded_data)
+    bits_items = bits_from_coded_data(coded_data)
     time_items = {"total_enc_time": float(elapsed) / 2.0, "total_dec_time": float(elapsed) / 2.0}
     if profile:
         time_items.update(getattr(model, "_codec_time", {}) or {})

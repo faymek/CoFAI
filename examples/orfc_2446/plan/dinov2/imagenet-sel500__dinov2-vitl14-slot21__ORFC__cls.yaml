@@ -1,0 +1,67 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - /data: imagenet_sel500
+  - /heads: dinov2_head
+  - /metrics:
+    - cls_metrics
+  - _self_
+
+name: imagenet-sel500__dinov2-vitl14-slot21__ORFC__cls
+description: "Data: ImageNet sel500; Model: DINOv2 ViT-L14/14; Codec: ORFC-2446 Soft-PQ blk20; Task: classification"
+dataset: ${datasets.imagenet_sel500}
+test_transforms:
+  - type: cofai.transforms.ResizeImage
+    size: 256
+    interpolation: BICUBIC
+  - type: cofai.transforms.CenterCropImage
+    size: 224
+collate:
+  mode: stack_only
+task_configs:
+  - label: cls
+    kind: cls
+    meter: ${metrics.cls_metrics}
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov2TimmBackbone
+    model_size: large
+    img_size: 224
+    patch_size: 14
+    dynamic_size: false
+    slot: 21  # encode blocks[:21] ("blk20")
+    n_last_blocks: 1
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov2/backbone/dinov2_vitl14_pretrain.pth
+  dino_codec:
+    type: cofai.latent_codecs.OrthoRotationFeatureCodec
+    orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz
+  heads:
+    cls: ${heads.imagenet_cls_large_last1}
+
+multi_run:
+  1:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz
+  2:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.npz
+  3:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz
+  4:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.npz
+  5:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42.npz
+  6:
+    model:
+      dino_codec:
+        orfc_weights_path: ${PROJECT_ROOT}/weights/orfc_2446/dinov2_vitl14_ori/blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.npz
