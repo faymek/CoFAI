@@ -1,0 +1,73 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: ade20k-val--dinov3-large-slot24--VTC-vbr
+description: "data: ADE20K val; model: VTC + DINOv3-Large layer23 + semseg head; task: segmentation; rate: VBR"
+dataset:
+  type: SegmentationDataset
+  root: ${PROJECT_ROOT}/data/ADEChallengeData2016
+  img_path: images/validation
+  seg_map_path: annotations/validation
+  file_list: null
+  reduce_zero_label: true
+test_transforms:
+  - type: cofai.transforms.PadImage
+    size: 512
+    keys: [img, semseg]
+  - type: cofai.transforms.PadToMultiple
+    multiple: 64
+    keys: [img, semseg]
+  - type: cofai.transforms.AddIgnoreRegions
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    meter:
+      type: MeanIoUMetric
+      num_classes: 150
+load:
+  path: ${PROJECT_ROOT}/weights/VTC/dinov3-vitl16-slot24--VTC-vbr.pth.tar
+  strict: false
+  rules: # type, pattern, replacement
+    - ["startswith", "dino.model", "useless"]
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: 24
+    n_last_blocks: 1
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+  dino_codec:
+    type: cofai.latent_codecs.VisualTokenCodec
+    h_dim: 1024
+    y_dim: 120
+    z_dim: 48
+    groups: 24
+    num_prefix_tokens: 5
+  heads:
+    semseg:
+      type: Dinov3SegmentationHead
+      in_channels: [1024]
+      in_index: [0]
+      input_transform: resize_concat
+      channels: 1024
+      num_classes: 150
+      patch_size: 16
+      checkpoint: ${PROJECT_ROOT}/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+
+multi_run:
+  0:
+  16:
+  32:
+  48:
+  64:
