@@ -19,6 +19,8 @@ from compressai.models.utils import conv, deconv
 from einops import rearrange
 
 from cofai.layers.vit import Block
+from cofai.layers.locality_aware import LocalityAwareBlock
+from cofai.entropy_models.sem import StreamlinedEntropyModel
 from cofai.utils.tensor_ops import center_pad, border_pad
 
 
@@ -582,4 +584,177 @@ class VisualTokenCodecVariant(CompressionModel):
 
         h_hat = torch.cat([h_cls_hat, h_patch_hat], dim=1)
         h_hat = self.post_vit_blocks(h_hat)
+        return {"h_hat": h_hat}
+
+
+@register_model("VTCLight")
+class VTCLight(CompressionModel):
+    """Low-complexity VTC with Locality-Aware Blocks and SEM.
+
+    A Locality-Aware Block transforms the tokens on each side of the codec.
+    Patch latents are coded by the DCVC-UF-style Streamlined Entropy Model,
+    with channel reduction and no spatial downsampling.
+    """
+
+    def __init__(
+        self,
+        h_dim=384,
+        y_dim=256,
+        z_dim=192,
+        num_prefix_tokens=1,
+        zero_init_residual=False,
+        **kwargs,
+    ):
+        super().__init__()
+        self.y_dim = y_dim
+        self.z_dim = z_dim
+        self.num_prefix_tokens = num_prefix_tokens
+
+        self.q_scale_pre = nn.Parameter(torch.ones((65, 1, h_dim)))
+        self.q_scale_post = nn.Parameter(torch.ones((65, 1, h_dim)))
+
+        self.q_scale_enc = nn.Parameter(torch.ones((65, y_dim, 1, 1)))
+        self.q_scale_dec = nn.Parameter(torch.ones((65, y_dim, 1, 1)))
+
+        self.pre_blocks = LocalityAwareBlock(
+            h_dim, h_dim, zero_init_residual=zero_init_residual
+        )
+        self.post_blocks = LocalityAwareBlock(
+            h_dim, h_dim, zero_init_residual=zero_init_residual
+        )
+
+        self.f_a = nn.Sequential(
+            conv(h_dim, y_dim, kernel_size=3, stride=1),
+            nn.ReLU(inplace=True),
+            conv(y_dim, y_dim, kernel_size=5, stride=1),
+        )
+        self.f_s = nn.Sequential(
+            deconv(y_dim, y_dim, kernel_size=5, stride=1),
+            nn.ReLU(inplace=True),
+            deconv(y_dim, h_dim, kernel_size=3, stride=1),
+        )
+
+        h_a = nn.Sequential(
+            conv(y_dim, z_dim, kernel_size=5, stride=2),
+            nn.ReLU(inplace=True),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
+        )
+
+        h_s = nn.Sequential(
+            deconv(z_dim, z_dim, kernel_size=5, stride=2),
+            nn.ReLU(inplace=True),
+            deconv(z_dim, y_dim * 2 + 2, kernel_size=5, stride=2),
+        )
+
+        self.y_lc = StreamlinedEntropyModel(channels=y_dim)
+        self.hyper_lc = HyperLatentCodec(
+            entropy_bottleneck=EntropyBottleneck(z_dim),
+            h_a=h_a,
+            h_s=h_s,
+            quantizer="ste",
+        )
+        self.prefix_lc = HyperLatentCodec(
+            entropy_bottleneck=EntropyBottleneck(z_dim),
+            h_a=nn.Conv2d(h_dim, z_dim, kernel_size=1),
+            h_s=nn.Conv2d(z_dim, h_dim, kernel_size=1),
+            quantizer="ste",
+        )
+
+    def forward(self, h, token_res, qp=0, **kwargs):
+        """Estimate rate and reconstruct prefix and patch tokens at ``qp``."""
+        enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
+        dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
+
+        h = self.pre_blocks(h, token_res) * self.q_scale_pre[qp : qp + 1, :, :]
+
+        h_prefix = h[:, 0 : self.num_prefix_tokens]
+        h_prefix = rearrange(h_prefix, "B L C -> B C L 1")
+        prefix_out = self.prefix_lc(h_prefix)
+        h_prefix_hat = prefix_out["params"]
+        h_prefix_hat = rearrange(h_prefix_hat, "B C L 1 -> B L C")
+
+        h_patch = h[:, self.num_prefix_tokens :].contiguous()
+        h_patch = rearrange(
+            h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
+        )
+        y = self.f_a(h_patch) * enc_gain
+        hyper_out = self.hyper_lc(border_pad(y, 2))
+        y_height, y_width = y.shape[-2:]
+        y_out = self.y_lc(y, hyper_out["params"][:, :, :y_height, :y_width])
+        y_hat = y_out["y_hat"] * dec_gain
+        h_patch_hat = self.f_s(y_hat)
+        h_patch_hat = rearrange(h_patch_hat, "B C H W -> B (H W) C")
+
+        h_hat = torch.cat([h_prefix_hat, h_patch_hat], dim=1)
+        h_hat = h_hat * self.q_scale_post[qp : qp + 1, :, :]
+        h_hat = self.post_blocks(h_hat, token_res)
+
+        return {
+            "h_hat": h_hat,
+            "likelihoods": {
+                "prefix": prefix_out["likelihoods"]["z"],
+                "y": y_out["likelihoods"]["y"],
+                "z": hyper_out["likelihoods"]["z"],
+            },
+        }
+
+    def compress(self, h, token_res, qp=0, **kwargs):
+        """Encode prefix, patch, and hyperprior latents at ``qp``."""
+        enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
+
+        h = self.pre_blocks(h, token_res) * self.q_scale_pre[qp : qp + 1, :, :]
+
+        h_prefix = h[:, 0 : self.num_prefix_tokens]
+        h_prefix = rearrange(h_prefix, "B L C -> B C L 1")
+        prefix_out = self.prefix_lc.compress(h_prefix)
+
+        h_patch = h[:, self.num_prefix_tokens :].contiguous()
+        h_patch = rearrange(
+            h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
+        )
+        y = self.f_a(h_patch) * enc_gain
+        y_pad = border_pad(y, 2)
+        hyper_out = self.hyper_lc.compress(y_pad)
+        _, _, y_H, y_W = y.shape
+        y_out = self.y_lc.compress(y, hyper_out["params"][:, :, :y_H, :y_W])
+
+        return {
+            "strings": {
+                "prefix": prefix_out["strings"],
+                "y": y_out["strings"],
+                "z": hyper_out["strings"],
+            },
+            "pstate": {
+                "prefix_shape": prefix_out["shape"],
+                "y_shape": y_out["shape"],
+                "z_shape": hyper_out["shape"],
+                "y_pad": (y_H, y_W),
+                "token_res": token_res,
+                "qp": qp,
+            },
+        }
+
+    def decompress(self, strings, pstate, **kwargs):
+        """Decode prefix and patch tokens from their entropy-coded latents."""
+        qp = pstate["qp"]
+        dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
+
+        prefix_out = self.prefix_lc.decompress(
+            strings["prefix"], pstate["prefix_shape"]
+        )
+        h_prefix_hat = prefix_out["params"]
+        h_prefix_hat = rearrange(h_prefix_hat, "B C L 1 -> B L C")
+
+        y_H, y_W = pstate["y_pad"]
+        hyper_out = self.hyper_lc.decompress(strings["z"], pstate["z_shape"])
+        y_out = self.y_lc.decompress(
+            strings["y"], pstate["y_shape"], hyper_out["params"][:, :, :y_H, :y_W]
+        )
+        y_hat = y_out["y_hat"] * dec_gain
+        h_patch_hat = self.f_s(y_hat)
+        h_patch_hat = rearrange(h_patch_hat, "B C H W -> B (H W) C")
+
+        h_hat = torch.cat([h_prefix_hat, h_patch_hat], dim=1)
+        h_hat = h_hat * self.q_scale_post[qp : qp + 1, :, :]
+        h_hat = self.post_blocks(h_hat, pstate["token_res"])
         return {"h_hat": h_hat}
