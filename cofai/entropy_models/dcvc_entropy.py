@@ -10,6 +10,7 @@ from cofai.layers.dcvc_cuda_inference import (
     build_index_enc,
     process_with_mask,
 )
+from cofai.ops.bound_ops import lower_bound
 
 
 class EntropyCoder:
@@ -389,3 +390,24 @@ class GaussianEncoder(AEHelper, nn.Module):
             y = torch.index_select(val, 0, back_index) * skip_cond
             return y.reshape(shape)
         return val.reshape(shape)
+
+    @staticmethod
+    def _standardized_cumulative(inputs):
+        half = float(0.5)
+        const = float(-(2**-0.5))
+        return half * torch.erfc(const * inputs)
+
+    def _likelihood(self, inputs, scales, means=None):
+        half = float(0.5)
+        dtype = inputs.dtype
+        values = inputs.float()
+        scales = scales.float()
+
+        if means is not None:
+            values = values - means.float()
+
+        scales = lower_bound(scales, self.scale_min)
+        values = torch.abs(values)
+        upper = self._standardized_cumulative((half - values) / scales)
+        lower = self._standardized_cumulative((-half - values) / scales)
+        return (upper - lower).to(dtype)

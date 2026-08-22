@@ -3,6 +3,7 @@ from .vqfc_model import VQFC, VectorQuantizer, BaseVAE, RESVQ
 from .dcvc_entropy import VbrFactorizedPrior, GaussianEncoder, EntropyCoder
 from .dcvc_base import DmcCompressionModel
 from .static_categorical import StaticCategoricalEntropyModel
+from .sem import StreamlinedEntropyModel
 
 __all__ = [
     "SoftmaxPrior",
@@ -16,4 +17,5 @@ __all__ = [
     "EntropyCoder",
     "DmcCompressionModel",
     "StaticCategoricalEntropyModel",
+    "StreamlinedEntropyModel",
 ]

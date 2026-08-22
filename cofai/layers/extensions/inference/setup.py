@@ -9,7 +9,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 
 cxx_flags = ["-O3"]
-nvcc_flags = ["-O3", "--use_fast_math", "--extra-device-vectorization", "-arch=native"]
+nvcc_flags = ["-O3", "--use_fast_math", "--extra-device-vectorization"]
 if sys.platform == 'win32':
     cxx_flags = ["/O2"]
 

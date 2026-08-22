@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 CUSTOMIZED_CUDA_INFERENCE = False
 try:
-    from inference_extensions_cuda import (
+    from .extensions.inference.inference_extensions_cuda import (
         process_with_mask_cuda,
         combine_for_reading_2x_cuda,
         restore_y_2x_cuda,
@@ -22,9 +22,9 @@ try:
         bias_pixel_shuffle_8_cuda,
         replicate_pad_cuda,
         build_index_enc_cuda,
-        DepthConvProxy,
-        SubpelConv2xProxy,
-    )  # noqa: F401
+        DepthConvProxy,  # noqa: F401
+        SubpelConv2xProxy,  # noqa: F401
+    )
 
     CUSTOMIZED_CUDA_INFERENCE = True
 except Exception:  # pylint: disable=W0718
@@ -68,9 +68,19 @@ def add_and_multiply(y_hat_0, y_hat_1, q_dec):
 
 
 def process_with_mask(y, scales, means, mask, force_zero_thres):
-    if CUSTOMIZED_CUDA_INFERENCE and y.is_cuda:
+    if (
+        CUSTOMIZED_CUDA_INFERENCE
+        and y.is_cuda
+        and y.dtype in (torch.float16, torch.float32)
+    ):
         thres = force_zero_thres if force_zero_thres is not None else -1.0
-        return process_with_mask_cuda(y, scales, means, mask, thres)
+        return process_with_mask_cuda(
+            y.contiguous(),
+            scales.contiguous(),
+            means.contiguous(),
+            mask.contiguous(),
+            thres,
+        )
 
     scales_hat = scales * mask
     means_hat = means * mask
@@ -132,9 +142,16 @@ def restore_y_2x_with_cat_after(y, means, mask, to_cat):
 
 
 def restore_y_4x(y, means, mask):
-    if CUSTOMIZED_CUDA_INFERENCE and y.is_cuda and y.is_contiguous():
-        out = torch.empty_like(means)
-        restore_y_4x_cuda(out, y, means, mask)
+    if (
+        CUSTOMIZED_CUDA_INFERENCE
+        and y.is_cuda
+        and y.is_contiguous()
+        and y.dtype in (torch.float16, torch.float32)
+    ):
+        out = torch.empty(
+            means.shape, dtype=means.dtype, device=means.device, layout=means.layout
+        )
+        restore_y_4x_cuda(out, y, means.contiguous(), mask.contiguous())
         return out
 
     return (torch.cat((y, y, y, y), dim=1) + means) * mask
@@ -143,8 +160,13 @@ def restore_y_4x(y, means, mask):
 def build_index_dec(
     scales, scale_min, scale_max, log_scale_min, log_step_recip, skip_thres=None
 ):
-    if CUSTOMIZED_CUDA_INFERENCE and scales.is_cuda:
-        out = torch.empty_like(scales, dtype=torch.uint8)
+    if (
+        CUSTOMIZED_CUDA_INFERENCE
+        and scales.is_cuda
+        and scales.dtype in (torch.float16, torch.float32)
+    ):
+        scales = scales.contiguous()
+        out = torch.empty(scales.shape, dtype=torch.uint8, device=scales.device)
         skip_cond = None
         if skip_thres is not None:
             skip_cond = torch.empty_like(scales, dtype=torch.bool)
@@ -181,8 +203,14 @@ def build_index_enc(
     log_step_recip,
     skip_thres=None,
 ):
-    if CUSTOMIZED_CUDA_INFERENCE and scales.is_cuda:
-        out = torch.empty_like(scales, dtype=torch.int16)
+    if (
+        CUSTOMIZED_CUDA_INFERENCE
+        and scales.is_cuda
+        and scales.dtype in (torch.float16, torch.float32)
+    ):
+        symbols = symbols.contiguous()
+        scales = scales.contiguous()
+        out = torch.empty(scales.shape, dtype=torch.int16, device=scales.device)
         skip_cond = None
         if skip_thres is not None:
             skip_cond = torch.empty_like(scales, dtype=torch.bool)
@@ -201,7 +229,8 @@ def build_index_enc(
             skip_thres,
         )
 
-        out = out[skip_cond]
+        if skip_cond is not None:
+            out = out[skip_cond]
         return out
 
     scales = scales.clamp_(scale_min, scale_max)
