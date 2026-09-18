@@ -4,6 +4,7 @@ from .image import (
     SegmentationDataset,
     NYUDepthDataset,
 )
+from .coco import CocoDetectionDataset
 from .feature import (
     FeatureFolder,
     FeatureDictPerSampleFolder,
@@ -28,6 +29,7 @@ __all__ = [
     "ClassificationDataset",
     "SegmentationDataset",
     "NYUDepthDataset",
+    "CocoDetectionDataset",
     "FeatureFolder",
     "FeatureDictPerSampleFolder",
     "FeatureDictPerKeyFolder",

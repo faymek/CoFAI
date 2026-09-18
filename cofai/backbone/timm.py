@@ -695,7 +695,10 @@ class Dinov3TimmBackbone(nn.Module):
         self.patch_size = patch_size
         self.dynamic_size = dynamic_size
         self.slot = slot
-        self.n_last_blocks = n_last_blocks
+        if isinstance(n_last_blocks, int):
+            self.n_last_blocks = n_last_blocks
+        else:
+            self.n_last_blocks = [int(i) for i in list(n_last_blocks)]
 
         self.qkvb = qkvb
         self.weights_tag = weights_tag
@@ -983,6 +986,17 @@ class Dinov3TimmBackbone(nn.Module):
         )
 
     def decode_depth(self, h, token_res):
+        return self._decode(
+            h,
+            slot=self.slot,
+            n=self.n_last_blocks,
+            norm=True,
+            return_format="[patch2d]",
+            token_res=token_res,
+        )
+
+    def decode_det(self, h, token_res):
+        """Patch maps at tap layers (default last-N, or an explicit layer-index list)."""
         return self._decode(
             h,
             slot=self.slot,

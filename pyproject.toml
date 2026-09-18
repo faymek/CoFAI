@@ -76,6 +76,7 @@ torchac = "^0.9.3"
 lpips = "^0.1.4"
 dotenv = "^0.9.9"
 setuptools = ">=65.0"
+pycocotools = "^2.0.8"
 
 
 [tool.poetry.group.docs]

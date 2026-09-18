@@ -74,13 +74,15 @@ class DinoFeatureCodecModel(CompressionModel):
     def _token_res(self, h, w):
         return (h // self.patch_size, w // self.patch_size)
 
-    def _decode_tasks(self, h_hat, token_res, tasks):
+    def _decode_tasks(self, h_hat, token_res, tasks, task_data=None):
         """Decode requested tasks from reconstructed tokens.
 
         ``seg`` returns raw backbone seg features (the seg head is applied by the
-        caller). ``cls`` / ``semseg`` / ``depth`` / ``rae`` apply their configured
-        head, which must be present in ``self.heads`` (``rae`` uses the ``rec`` head).
+        caller). ``cls`` / ``semseg`` / ``depth`` / ``rae`` / ``det`` apply their
+        configured head, which must be present in ``self.heads`` (``rae`` uses
+        the ``rec`` head).
         """
+        task_data = task_data or {}
         task_feats = {}
         if "cls" in tasks:
             feat = self.dino.decode_cls(h_hat)
@@ -99,6 +101,14 @@ class DinoFeatureCodecModel(CompressionModel):
                 int(token_res[1]) * int(self.patch_size),
             )
             task_feats["depth"] = self.heads["depth"].predict(feat, size=size)
+        if "det" in tasks:
+            feat = self.dino.decode_det(h_hat, token_res)
+            det_gt = task_data.get("det") or {}
+            task_feats["det"] = self.heads["det"].predict(
+                feat,
+                orig_size=det_gt.get("orig_size"),
+                image_id=det_gt.get("image_id"),
+            )
         if "rae" in tasks:
             feat = self.dino.decode_rae(h_hat, token_res)
             task_feats["rae"] = self.heads["rec"].predict(
@@ -171,7 +181,12 @@ class DinoFeatureCodecModel(CompressionModel):
             }
             h_dino_hat = coded_unit["h_hat"]
 
-            task_feats = self._decode_tasks(h_dino_hat, token_res, tasks)
+            task_feats = self._decode_tasks(
+                h_dino_hat,
+                token_res,
+                tasks,
+                task_data=kwargs.get("task_data") or {},
+            )
             return coded_unit, task_feats
 
     def compress(self, x, qp=0, **kwargs):
@@ -194,7 +209,12 @@ class DinoFeatureCodecModel(CompressionModel):
         self._codec_time = getattr(self, "_codec_time", {})
         self._codec_time["codec_dec_time"] = codec_t
         h_hat = decoded["h_hat"]
-        return self._decode_tasks(h_hat, token_res, tasks)
+        return self._decode_tasks(
+            h_hat,
+            token_res,
+            tasks,
+            task_data=kwargs.get("task_data") or {},
+        )
 
 
 @register("DinoSlideFeatureCodecModel")
