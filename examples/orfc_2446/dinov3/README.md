@@ -1,9 +1,6 @@
 # ORFC-2446 — DINOv3
 
-The DINOv3 integration evaluates ViT-L/16 slot24 on:
-
-- ADE20K semantic segmentation
-- NYUv2 depth estimation
+The DINOv3 integration evaluates ViT-L/16 **slot24** (ADE20K / NYUv2) and **slot6** (ADE20K / NYUv2 / COCO val 1k detection).
 
 Both plans use the standard `DinoFeatureCodecModel` and
 `OrthoRotationFeatureCodec`.
@@ -27,10 +24,16 @@ unzip -jo "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori.zip" \
   -d "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori"
 unzip "$PROJECT_ROOT/data/ADE20K.zip" -d "$PROJECT_ROOT/data"
 unzip "$PROJECT_ROOT/data/NYU_subset_for_training_depth_head.zip" -d "$PROJECT_ROOT/data"
+unzip "$PROJECT_ROOT/data/coco_val_1k.zip" -d "$PROJECT_ROOT/data"
+mkdir -p "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_slot6"
+unzip -jo "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_slot6.zip" \
+  'blk05_*.npz' \
+  -d "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_slot6"
 ```
 
-The manifest installs the DINOv3 backbone, datasets, task heads, and the eight
-released ORFC-2446 artifacts consumed by the plans:
+The manifest installs the DINOv3 backbone, datasets, task heads, and SoftPQ zips.
+
+slot24 artifacts (`dinov3_vitl16_ori/`):
 
 ```text
 weights/orfc_2446/dinov3_vitl16_ori/
@@ -43,6 +46,8 @@ weights/orfc_2446/dinov3_vitl16_ori/
 ├── blk23_K256_e8.npz
 └── blk23_K512_e8.npz
 ```
+
+slot6 artifacts (`dinov3_vitl16_slot6/`): `blk05_K4_e32.npz` / `K8` / `K16` / `K256`（plan `multi_run` 1–4）。
 
 Each artifact contains `R`, `codebooks`, `pmf`, `norm_mode`, and `n_prefix`.
 

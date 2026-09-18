@@ -27,7 +27,7 @@ examples/orfc_2446/
 | 子目录 | 任务 | 网盘 SoftPQ 权重 |
 |--------|------|------------------|
 | [dinov2/](dinov2/README.md) | ImageNet cls / VOC seg | 有（见下方下载） |
-| [dinov3/](dinov3/README.md) | ADE20K semseg / NYUv2 depth | 有（见下方下载） |
+| [dinov3/](dinov3/README.md) | ADE20K / NYUv2 / COCO val 1k det（slot6） | 有（见下方下载） |
 
 核心训练算法：`examples/orfc_2446/offline/soft_pq.py`；在线 codec：
 `cofai.latent_codecs.OrthoRotationFeatureCodec`。
@@ -55,12 +55,17 @@ mkdir -p weights/orfc_2446/dinov3_vitl16_ori
 unzip -jo weights/orfc_2446/dinov3_vitl16_ori.zip \
   'blk23_*.npz' \
   -d weights/orfc_2446/dinov3_vitl16_ori
+mkdir -p weights/orfc_2446/dinov3_vitl16_slot6
+unzip -jo weights/orfc_2446/dinov3_vitl16_slot6.zip \
+  'blk05_*.npz' \
+  -d weights/orfc_2446/dinov3_vitl16_slot6
 
 # 数据集 zip 仍需手动解压
 unzip data/ImageNet_val_sel500.zip -d data/
 unzip data/VOC2012_sel100.zip -d data/
 unzip data/ADE20K.zip -d data/
 unzip data/NYU_subset_for_training_depth_head.zip -d data/
+unzip data/coco_val_1k.zip -d data/
 ```
 
 解压后目录：
@@ -75,7 +80,8 @@ CoFAI/
     └─ orfc_2446/
         ├─ dinov2_vitl14_ori/*.npz
         ├─ dinov2_vitg14_ori/*.npz
-        └─ dinov3_vitl16_ori/*.npz
+        ├─ dinov3_vitl16_ori/*.npz
+        └─ dinov3_vitl16_slot6/blk05_K{4,8,16,256}_e32.npz
 ```
 
 详细在线/离线命令见 [dinov2/README.md](dinov2/README.md)。DINOv3 见

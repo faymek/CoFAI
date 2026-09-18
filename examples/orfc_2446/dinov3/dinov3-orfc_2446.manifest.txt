@@ -5,15 +5,16 @@
 # 省略 URL 时, 默认从
 # https://medialab.sjtu.edu.cn/files/CoFAI-share/<目标相对路径> 下载。
 #
-# 下载完成后将压缩包中的 blk23_*.npz 解压到:
-#   weights/orfc_2446/dinov3_vitl16_ori/
+# 下载完成后将 blk23_*.npz 解压到 weights/orfc_2446/dinov3_vitl16_ori/，
+# 将 blk05_*.npz 解压到 weights/orfc_2446/dinov3_vitl16_slot6/。
 #
-# 覆盖 examples/orfc_2446/plan/dinov3/*ORFC* 全部在线评测。
+# 覆盖 examples/orfc_2446/plan/dinov3/*ORFC* 全部在线评测（含 slot24 / slot6）。
 
 
 # --- 数据集 ---
 data/ADE20K.zip  sha256:95253fe4
 data/NYU_subset_for_training_depth_head.zip  sha256:0762c3ea
+data/coco_val_1k.zip  sha256:6b6a1b2d
 
 
 # --- DINOv3-Large backbone ---
@@ -23,8 +24,11 @@ weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors  sha256:4517
 # --- 任务头 ---
 weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth  sha256:98cd2ec1
 weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth  sha256:e8931641
+weights/dinov3/det_head/plain_detr_dinov3_vitl16_checkpoint_best.pth  sha256:5b72591f
 
 
 # --- SoftPQ 量化权重压缩包 ---
-# 解压后得到 weights/orfc_2446/dinov3_vitl16_ori/*.npz。
+# 解压后得到 weights/orfc_2446/dinov3_vitl16_ori/*.npz（slot24）。
 weights/orfc_2446/dinov3_vitl16_ori.zip  sha256:8086eba833f4e10ed30e0f4e0e4778927e3b4fa9f9b23fd73726eaef3aa8237a
+# 解压后得到 weights/orfc_2446/dinov3_vitl16_slot6/blk05_K{4,8,16,256}_e32.npz。
+weights/orfc_2446/dinov3_vitl16_slot6.zip  sha256:32f5acf5

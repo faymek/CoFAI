@@ -1,5 +1,6 @@
 from .dinov2_heads import Dinov2ClassifierHead, Dinov2SegmentationHead
 from .dinov3_heads import Dinov3DepthHead, Dinov3SegmentationHead
+from .dinov3_det_head import Dinov3PlainDETRHead
 from .transreid_jpm import TransReIDJPMHead
 from .mlore_heads import (
     MLoREConvHead,
@@ -14,6 +15,7 @@ __all__ = [
     "Dinov2SegmentationHead",
     "Dinov3SegmentationHead",
     "Dinov3DepthHead",
+    "Dinov3PlainDETRHead",
     "TransReIDJPMHead",
     # MLoRE/RFC components
     "MLoREConvHead",

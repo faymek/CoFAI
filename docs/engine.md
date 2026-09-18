@@ -214,7 +214,7 @@ EvalBatch 经过评估评估得到的中间结果：
   - **`kind` 即 `gt_key`**：数据集返回的 GT 字段名，是跨数据集统一的"模态/任务"命名（例如 `rec`、`semseg`、`edge`、`depth` 等）。
   - **`label` 即 `out_key`**：模型输出 `task_feats` 的键名。同一模态可以有多个方案或变体，通过不同的 `label` 区分（例如 `rec1`、`rec2`，其 `kind` 均为 `rec`，对应重建任务）。
   - **契约**：eval loop 从 `EvalBatch.samples[i]` 读取 kind 对应的 GT 结果，从 task_feats 中获取 label 对应的预测结果，将二者输入 meter 得到指标结果。
-  - **`kind` 的允许集合（严格模式）**：定义于 `cofai/engine/evaluator.py` 中的 `ALLOWED_KINDS`，当前包含 `rec`、`semseg`、`cls`、`depth`、`edge`、`sal`、`normals`、`scene`、`human_parts`、`vqa`。若不在集合内，将触发 fail-fast 报错。
+  - **`kind` 的允许集合（严格模式）**：定义于 `cofai/engine/evaluator.py` 中的 `ALLOWED_KINDS`，当前包含 `rec`、`semseg`、`cls`、`depth`、`edge`、`sal`、`normals`、`scene`、`human_parts`、`vqa`、`det`。若不在集合内，将触发 fail-fast 报错。
 
 - **既往实现的迁移说明**：
   - **重建语义（rec）**：以 `kind=rec` 标识重建模态，`label` 可自由命名（例如 `rae`）。
