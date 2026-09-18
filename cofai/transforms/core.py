@@ -152,6 +152,57 @@ class ResizeToFit:
         return f"{self.__class__.__name__}(size={self.size}, keys={self._keys!r})"
 
 
+class ResizeShortSide:
+    """Resize so the short side equals ``size``, capped by ``max_size`` on the long side.
+
+    Matches Plain-DETR / H-Deformable-DETR ``RandomResize([size], max_size=...)``.
+    Operates on HWC numpy arrays (``img`` in ``[0, 1]`` float32).
+    """
+
+    def __init__(self, size=1024, max_size=1536, keys: Optional[Sequence[str]] = None):
+        self.size = int(size)
+        self.max_size = int(max_size)
+        self._keys: tuple[str, ...] = ("img",) if keys is None else tuple(keys)
+
+    def _new_wh(self, width: int, height: int) -> tuple[int, int]:
+        w, h = int(width), int(height)
+        size = self.size
+        min_original = float(min(w, h))
+        max_original = float(max(w, h))
+        if max_original / min_original * size > self.max_size:
+            size = int(round(self.max_size * min_original / max_original))
+        if (w <= h and w == size) or (h <= w and h == size):
+            return w, h
+        if w < h:
+            return size, int(size * h / w)
+        return int(size * w / h), size
+
+    def __call__(self, sample):
+        img = sample.get("img")
+        if img is None:
+            return sample
+        h, w = int(np.shape(img)[0]), int(np.shape(img)[1])
+        new_w, new_h = self._new_wh(w, h)
+        if new_w == w and new_h == h:
+            return sample
+        for key in self._keys:
+            if key not in sample:
+                continue
+            arr = np.squeeze(sample[key])
+            interp = cv2.INTER_LINEAR if key in {"img", "rec", "rae"} else cv2.INTER_NEAREST
+            out = cv2.resize(arr, (new_w, new_h), interpolation=interp)
+            if out.ndim == 2:
+                out = np.expand_dims(out, axis=2)
+            sample[key] = out
+        return sample
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(size={self.size}, max_size={self.max_size}, "
+            f"keys={self._keys!r})"
+        )
+
+
 class ResizeImage:
     """Thin adapter over ``torchvision.transforms.v2.Resize``.
 

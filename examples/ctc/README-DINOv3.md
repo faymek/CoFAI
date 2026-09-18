@@ -12,8 +12,8 @@
 |----|------|
 | 模型 | DINOv3 `vitl16`（`model_size=large` + `patch_size=16`） |
 | 分割点 | **Layer 23（必选）**；Layer 5 / 11 / 17 可选 |
-| 输入尺度 | 原生尺寸（padding 到 16 的整数倍） |
-| 下游任务 | 分割 / ADE20K，深度估计 / NYUv2，目标检测（未定），图像重建（未定） |
+| 输入尺度 | 分割 / 深度：原生尺寸（padding 到 16 的整数倍）；检测：Plain-DETR short-side 1024（max 1536） |
+| 下游任务 | 分割 / ADE20K，深度估计 / NYUv2，目标检测 / COCO val 1k（slot6），图像重建（未定） |
 
 > 注意：CTC 评测取用的最后一层特征是 **norm 之前** 的特征。
 
@@ -31,6 +31,7 @@ poetry run cofai-download examples/ctc/dinov3-ctc.manifest.txt
 ```bash
 unzip data/ADE20K.zip -d data/
 unzip data/NYU_subset_for_training_depth_head.zip -d data/
+unzip data/coco_val_1k.zip -d data/
 ```
 
 解压后的最终目录结构如下：
@@ -42,15 +43,20 @@ CoFAI/
 │   ├─ ADEChallengeData2016/
 │   │   ├─ images/
 │   │   └─ annotations/
-│   └─ NYU/
-│       ├─ train/  test/
-│       └─ nyu_train.txt  nyu_test.txt
+│   ├─ NYU/
+│   │   ├─ train/  test/
+│   │   └─ nyu_train.txt  nyu_test.txt
+│   └─ coco_val_1k/
+│       ├─ val2017/
+│       ├─ annotations/instances_val2017.json
+│       └─ coco_val_1k.txt
 │
 ├─ weights/                               # 预训练权重
 │   └─ dinov3/
 │       ├─ backbone/
 │       ├─ semseg_head/
-│       └─ dpt_head/
+│       ├─ dpt_head/
+│       └─ det_head/
 ```
 
 ## 3. 运行测试
@@ -60,14 +66,44 @@ CoFAI/
 通过统一评测引擎 `cofai-eval` 执行任一 plan，结果（bpp / bpfp / mIoU 或 RMSE 等）写入 `logs/<plan-name>/result.json`：
 
 ```bash
-# ADE20K 语义分割（Bypass 基线）
+# ADE20K 语义分割（Bypass 基线，Layer 23 / slot24）
 CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
 
-# NYUv2 深度估计（Bypass 基线）
+# NYUv2 深度估计（Bypass 基线，Layer 23 / slot24）
 CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
+
+# ADE20K 语义分割（Bypass 基线，Layer 5 / slot6 / blk05）
+# encode 切在 blk05，bypass 后 replay blocks[6:]，head 仍用最后一层特征
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/ade20k-val__dinov3-vitl16-slot6__Bypass__semseg.yaml
+
+# NYUv2 深度估计（Bypass 基线，Layer 5 / slot6 / blk05）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/nyuv2-val__dinov3-vitl16-slot6__Bypass__depth.yaml
+
+# ADE20K 语义分割（ORFC SoftPQ，Layer 5 / slot6 / blk05）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  examples/orfc_2446/plan/dinov3/ade20k-val__dinov3-vitl16-slot6__ORFC__semseg.yaml \
+  args.multi_run=true args.cuda=true args.real=true
+
+# NYUv2 深度估计（ORFC SoftPQ，Layer 5 / slot6 / blk05）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  examples/orfc_2446/plan/dinov3/nyuv2-val__dinov3-vitl16-slot6__ORFC__depth.yaml \
+  args.multi_run=true args.cuda=true args.real=true
+
+# COCO val 1k 检测（Bypass，Layer 5 / slot6，short-side 1024，Plain-DETR）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  conf/plan/coco-val1k__dinov3-vitl16-slot6__Bypass__det.yaml
+
+# COCO val 1k 检测（ORFC SoftPQ，Layer 5 / slot6）
+CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
+  examples/orfc_2446/plan/dinov3/coco-val1k__dinov3-vitl16-slot6__ORFC__det.yaml \
+  args.multi_run=true args.cuda=true args.real=true
 ```
+
+slot6 ORFC 码本：`poetry run cofai-download examples/orfc_2446/dinov3/dinov3-orfc_2446.manifest.txt` 后解压 `weights/orfc_2446/dinov3_vitl16_slot6.zip` 到同名目录；4 档 `blk05_K{4,8,16,256}_e32.npz`，不要混用 `blk23_*`。检测 head 结构在仓库 `vendor/dinov3`；评测需 `pycocotools`（已写入 `pyproject.toml`）。
 
 需要统计 **latent codec 复杂度**（参数量、编码/解码 FLOPs、codec 耗时）时，加上 `args.profile=true`；结果会写入 `result.json` 末尾的 `codec_*` 字段（`codec_params`、`codec_enc_flops`、`codec_dec_flops`、`codec_enc_time`、`codec_dec_time`）。`args.max_samples` 同样生效，不设则跑完整数据集后取平均。
 
@@ -81,8 +117,21 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
 
 | Plan | bpp | 指标 |
 |------|-----|------|
-| `ade20k-val__dinov3-vitl16-slot24__Bypass__semseg` | 0.0 | mIoU 0.5309 |
-| `nyuv2-val__dinov3-vitl16-slot24__Bypass__depth` | 0.0 | RMSE 0.3477 |
+| `ade20k-val__dinov3-vitl16-slot24__Bypass__semseg` | 0.0 | mIoU 0.5307 |
+| `nyuv2-val__dinov3-vitl16-slot24__Bypass__depth` | 0.0 | RMSE 0.3474 |
+| `ade20k-val__dinov3-vitl16-slot6__Bypass__semseg` | 0.0 | mIoU 0.5307（与 slot24 一致） |
+| `nyuv2-val__dinov3-vitl16-slot6__Bypass__depth` | 0.0 | RMSE 0.3474（与 slot24 一致） |
+| `coco-val1k__dinov3-vitl16-slot6__Bypass__det` | 0.0 | AP 0.5568 / AP50 0.7612 |
+
+slot6 ORFC（`blk05_*` SoftPQ，4 档 `real` rANS；summary 在 `logs/<plan>/summary.json`）：
+
+| q | 码本 | ADE bpp / mIoU | NYUv2 bpp / RMSE | COCO 1k bpp / bpfp / AP / AP50 |
+|---|------|----------------|------------------|--------------------------------|
+| 1 | K4e32 | 0.252 / 0.4918 | 0.234 / 0.3973 | 1.266 / 0.0553 / 0.4489 / 0.6544 |
+| 2 | K8e32 | 0.377 / 0.5110 | 0.360 / 0.3904 | 1.984 / 0.0867 / 0.4932 / 0.6982 |
+| 3 | K16e32 | 0.504 / 0.5140 | 0.482 / 0.3797 | 2.711 / 0.1183 / 0.5060 / 0.7155 |
+| 4 | K256e32 | 1.024 / 0.5275 | 0.993 / 0.3626 | 5.633 / 0.2459 / 0.5359 / 0.7437 |
+
 
 ## 4. 统一架构总览
 
@@ -113,7 +162,7 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
 | `MPC` | `VbrVitUnionLatentCodec` | 可变码率 ViT union 熵模型 |
 | `RFC` | `MLoREFeatureCodec` | MLoRE 多任务低秩专家特征编码 |
 
-- **head**：下游任务预测头，支持 `cls` / `seg` / `semseg` / `depth` / `rae`（特征重建），由提供的 `heads` 决定。
+- **head**：下游任务预测头，支持 `cls` / `seg` / `semseg` / `depth` / `det` / `rae`（特征重建），由提供的 `heads` 决定。
 
 
 ### `DinoSlideFeatureCodecModel`（滑窗子类，CTC 一般不用）
@@ -155,18 +204,21 @@ slot 约定：transformer block 从 0 开始计数记作 `Layer n`，其输入�
 | Layer 11 | `slot12` |
 | Layer 5  | `slot6`  |
 
+`slot6` 对应 **blk05**：`encode` 走 `blocks[:6]`（block 0–5），`decode_*` 从 `blocks[6:]` replay 到网络末端。Bypass 评测时 codec 直通，**head 仍使用最后一层特征**（`n_last_blocks: 1`），与 slot24 共用同一套 semseg / depth 权重。
+
 
 
 ## 8. 下游任务头与权重
 
-CTC 当前落地的两个任务头（见 `conf/heads/dinov3_head.yaml`）：
+CTC 当前落地的任务头（见 `conf/heads/dinov3_head.yaml`）：
 
 | 任务 | 数据集 | head 类型 | 预训练权重 |
 |------|--------|-----------|------------|
 | 语义分割 | ADE20K | `Dinov3SegmentationHead`（150 类，linear head） | `weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth` |
 | 深度估计 | NYUv2 | `Dinov3DepthHead`（linear head，depth 0.001–10.0） | `weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth` |
+| 目标检测 | COCO val 1k | `Dinov3PlainDETRHead`（四尺度 tap + Plain-DETR） | `weights/dinov3/det_head/plain_detr_dinov3_vitl16_checkpoint_best.pth` |
 
-目标检测、图像重建任务头待定。
+图像重建任务头待定。
 
 ## 9. Plan 组合与命名
 
@@ -191,6 +243,12 @@ CTC 当前落地的两个任务头（见 `conf/heads/dinov3_head.yaml`）：
 ```
 ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
 nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
+ade20k-val__dinov3-vitl16-slot6__Bypass__semseg.yaml
+nyuv2-val__dinov3-vitl16-slot6__Bypass__depth.yaml
+ade20k-val__dinov3-vitl16-slot6__ORFC__semseg.yaml
+nyuv2-val__dinov3-vitl16-slot6__ORFC__depth.yaml
+coco-val1k__dinov3-vitl16-slot6__Bypass__det.yaml
+coco-val1k__dinov3-vitl16-slot6__ORFC__det.yaml
 ```
 
 plan 内部结构（节选）：

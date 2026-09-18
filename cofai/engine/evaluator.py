@@ -19,6 +19,7 @@ ALLOWED_KINDS = {
     "normals",
     "scene",
     "vqa",
+    "det",
 }
 
 
