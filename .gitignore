@@ -30,8 +30,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Only ignore a repo-root packaging dir. Do not use unanchored `lib/` —
+# it would drop `examples/*/lib/` helpers (force-added elsewhere already).
+/lib/
+/lib64/
 parts/
 sdist/
 var/
