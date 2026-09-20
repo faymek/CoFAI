@@ -7,8 +7,8 @@ DINOv3 ViT-L/16 **slot24 / blk23** 特征压缩，CTC 任务：**ADE20K 语义�
 
 | 变体 | Plan 标记 | 权重 |
 |------|-----------|------|
-| **有正交变换** | `__PQFC__` | [ORFC-2446 DINOv3 release](../orfc_2446/dinov3/README.md) `weights/orfc_2446/dinov3_vitl16_ori/blk23_*.npz` |
-| **无正交变换** | `__PQFC-noR__` | 训练导出到 `weights/pqfc/dinov3_vitl16_noR/`（plan 占位路径；未训练前评测会缺文件） |
+| **有正交变换** | `__PQFC__` | `weights/orfc_2446/dinov3_vitl16_ori/blk23_K{K}_e{d}.npz`（ORFC-2446 DINOv3 release） |
+| **无正交变换** | `__PQFC-noR__` | `weights/pqfc/dinov3_vitl16_noR/blk23_K{K}_e{d}_no_transform.npz`（`R = I`） |
 
 ```text
 examples/pqfc/
@@ -21,6 +21,7 @@ examples/pqfc/
 ├── run_pqfc_dinov3.py           # 离线 replay / rate
 └── scripts/
     ├── run_eval_ctc.sh
+    ├── run_eval_parallel.py
     ├── prepare_dinov3.sh
     ├── extract_train.sh / extract_val.sh
     ├── train_dinov3.sh
@@ -39,7 +40,18 @@ export SOURCE_ROOT PROJECT_ROOT PYTHONPATH="$SOURCE_ROOT"
 bash examples/pqfc/scripts/prepare_dinov3.sh
 ```
 
-有变换 8 档与 ORFC-2446 相同（见 `plan/dinov3/*__PQFC__*.yaml`）。
+有变换 8 档；无变换 7 档（无 `K512_e8`），文件名多 `_no_transform`，目录为 `weights/pqfc/dinov3_vitl16_noR/`：
+
+| quality | 有变换 | 无变换 |
+| ---: | --- | --- |
+| 1 | `blk23_K16_e32.npz` | `blk23_K16_e32_no_transform.npz` |
+| 2 | `blk23_K256_e32.npz` | `blk23_K256_e32_no_transform.npz` |
+| 3 | `blk23_K1024_e32.npz` | `blk23_K1024_e32_no_transform.npz` |
+| 4 | `blk23_K512_e16.npz` | `blk23_K512_e16_no_transform.npz` |
+| 5 | `blk23_K1024_e16.npz` | `blk23_K1024_e16_no_transform.npz` |
+| 6 | `blk23_K64_e8.npz` | `blk23_K64_e8_no_transform.npz` |
+| 7 | `blk23_K256_e8.npz` | `blk23_K256_e8_no_transform.npz` |
+| 8 | `blk23_K512_e8.npz` | — |
 
 ## 离线训练
 
@@ -69,10 +81,16 @@ bash examples/pqfc/scripts/replay_dinov3.sh --task semseg \
 
 ## 在线评测
 
+默认按 **quality 并行**（有变换 8 档 / 无变换 7 档 × 任务数）。`PROJECT_ROOT` 指向数据/backbone 所在 checkout；`PYTHONPATH` 指向本 worktree。
+
 ```bash
-GPU_IDS=0,1 bash examples/pqfc/scripts/run_eval_ctc.sh
+# 有变换
+GPU_IDS=2,4,5,6,7,0,1 bash examples/pqfc/scripts/run_eval_ctc.sh
+
+# 无变换（R=I）
+VARIANT=noR GPU_IDS=2,4,5,6,7,0,1 bash examples/pqfc/scripts/run_eval_ctc.sh
+
 TASK=semseg GPU_IDS=0 bash examples/pqfc/scripts/run_eval_ctc.sh
-VARIANT=noR GPU_IDS=0 bash examples/pqfc/scripts/run_eval_ctc.sh
 ```
 
 单 plan：

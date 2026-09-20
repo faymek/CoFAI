@@ -152,13 +152,12 @@ class StaticCategoricalEntropyModel(nn.Module):
 
         labels = []
         for stream, cdf in zip(streams, self._cdfs):
-            decoder = RansDecoder()
-            decoder.set_stream(stream)
-            symbols = decoder.decode_stream(
+            symbols = RansDecoder().decode_with_indexes(
+                stream,
                 [0] * num_samples,
-                [cdf] * num_samples,
-                [self.num_symbols + 2] * num_samples,
-                [0] * num_samples,
+                [cdf],
+                [self.num_symbols + 2],
+                [0],
             )
             labels.append(
                 torch.tensor(symbols, dtype=torch.int64, device=self.pmf.device)

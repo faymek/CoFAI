@@ -1,4 +1,4 @@
-"""PQFC DINOv3 online plans: transform reuses ORFC-2446 release; noR is placeholder."""
+"""PQFC DINOv3 online plans: transform uses ORFC-2446 release; noR uses R=I artifacts."""
 
 from __future__ import annotations
 
@@ -43,7 +43,8 @@ def test_pqfc_dinov3_plans_exist_and_use_public_codec():
         assert plan["model"]["dino_codec"]["type"].split(".")[-1] == (
             OrthoRotationFeatureCodec.__name__
         )
-        assert len(plan["multi_run"]) == 8
+        expected = 7 if "__PQFC-noR__" in plan_path.name else 8
+        assert len(plan["multi_run"]) == expected
 
 
 def test_pqfc_transform_weights_are_orfc_2446_release():
@@ -60,19 +61,23 @@ def test_pqfc_transform_weights_are_orfc_2446_release():
         assert names == RELEASE_NAMES
 
 
-def test_pqfc_nor_weights_are_placeholders():
+def test_pqfc_nor_weights_use_canonical_dir():
     for plan_path in _plans("__PQFC-noR__"):
         plan = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
         default = plan["model"]["dino_codec"]["orfc_weights_path"]
         assert "weights/pqfc/dinov3_vitl16_noR/" in default
+        assert default.endswith("_no_transform.npz")
         names = [
             Path(overrides["model"]["dino_codec"]["orfc_weights_path"]).name
             for overrides in plan["multi_run"].values()
         ]
-        assert names == RELEASE_NAMES
+        assert names == [
+            name.replace(".npz", "_no_transform.npz") for name in RELEASE_NAMES[:-1]
+        ]
         for overrides in plan["multi_run"].values():
             path = overrides["model"]["dino_codec"]["orfc_weights_path"]
             assert "weights/pqfc/dinov3_vitl16_noR/" in path
+            assert path.endswith("_no_transform.npz")
 
 
 def test_pqfc_train_imports_orfc_2446_not_entropy_models():
