@@ -177,13 +177,12 @@ class _ORFCMixin:
             cdf[K + 1] = 1 << 16
             cdf_list = cdf.tolist()
 
-            decoder = RansDecoder()
-            decoder.set_stream(byte_strings[g])
-            indices = decoder.decode_stream(
+            indices = RansDecoder().decode_with_indexes(
+                byte_strings[g],
                 [0] * n_tokens,
-                [cdf_list] * n_tokens,
-                [K + 2] * n_tokens,
-                [0] * n_tokens,
+                [cdf_list],
+                [K + 2],
+                [0],
             )
             all_labels.append(torch.tensor(indices, dtype=torch.int64, device=device))
 

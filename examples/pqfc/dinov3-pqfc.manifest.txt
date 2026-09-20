@@ -1,7 +1,7 @@
 # PQFC DINOv3 数据与权重清单 (cofai-download)
 #
 # 有变换分支复用 ORFC-2446 DINOv3 release zip（解压到 weights/orfc_2446/dinov3_vitl16_ori/）。
-# 无变换权重尚未发布，plan 指向 weights/pqfc/dinov3_vitl16_noR/（占位，不在本清单下载）。
+# 无变换权重：weights/pqfc/dinov3_vitl16_noR/blk23_K{K}_e{d}_no_transform.npz（R=I，q1–q7，无 K512_e8）。
 
 # --- 数据集 ---
 data/ADE20K.zip  sha256:95253fe4

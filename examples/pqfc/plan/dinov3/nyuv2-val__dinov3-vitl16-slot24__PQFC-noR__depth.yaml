@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 name: nyuv2-val__dinov3-vitl16-slot24__PQFC-noR__depth
-description: "Data: NYUv2 val; Model: DINOv3 ViT-L/16 slot24; Codec: PQFC without orthogonal transform (placeholder weights); Task: depth estimation"
+description: "Data: NYUv2 val; Model: DINOv3 ViT-L/16 slot24; Codec: PQFC without orthogonal transform (R=I); Task: depth estimation"
 args:
   real: true
 dataset:
@@ -45,8 +45,7 @@ model:
     ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
   dino_codec:
     type: cofai.latent_codecs.OrthoRotationFeatureCodec
-    # Placeholder: no-transform (R = I) artifacts are not released yet.
-    orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K256_e32.npz
+    orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K256_e32_no_transform.npz
   heads:
     depth:
       type: Dinov3DepthHead
@@ -65,32 +64,28 @@ multi_run:
   1:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K16_e32.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K16_e32_no_transform.npz
   2:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K256_e32.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K256_e32_no_transform.npz
   3:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K1024_e32.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K1024_e32_no_transform.npz
   4:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K512_e16.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K512_e16_no_transform.npz
   5:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K1024_e16.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K1024_e16_no_transform.npz
   6:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K64_e8.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K64_e8_no_transform.npz
   7:
     model:
       dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K256_e8.npz
-  8:
-    model:
-      dino_codec:
-        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K512_e8.npz
+        orfc_weights_path: ${PROJECT_ROOT}/weights/pqfc/dinov3_vitl16_noR/blk23_K256_e8_no_transform.npz
