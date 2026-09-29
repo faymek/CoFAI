@@ -1,0 +1,53 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: mmstar__qwen3vl-8b-ins-slot9__pca-align__vqa
+description: "data: MMStar; model: Qwen3vlFeatureCodecModel + pca-align; task: multiple-choice accuracy"
+
+dataset:
+  type: MMStarDataset
+  data_path: ${PROJECT_ROOT}/data/MMStar.tsv
+  prompt_suffix: "Please select the correct answer from the options above.\nYou MUST reply with one single letter (A/B/C/D) with no explanation."
+
+task_configs:
+  - label: vqa
+    kind: vqa
+    meter:
+      type: MMStarAccuracyMetric
+
+model:
+  type: Qwen3vlFeatureCodecModel
+  qwen_backbone:
+    type: cofai.backbone.Qwen3VLBackbone
+    model_path: ${PROJECT_ROOT}/weights/Qwen/Qwen3-VL-8B-Instruct
+    dtype: bfloat16
+    min_pixels: 602112
+    max_pixels: 1204224
+    max_new_tokens: 10
+    do_sample: false
+    slot: 9
+    local_files_only: true
+  qwen_codec:
+    type: cofai.latent_codecs.pca_align.SimpleHyperpriorUDualGain
+    U_Transform: ${PROJECT_ROOT}/weights/pca_align/U-fix.npy
+    mean_vector: ${PROJECT_ROOT}/weights/pca_align/mean-fix.npy
+    pretrained_path: ${PROJECT_ROOT}/weights/pca_align/ckpt_epoch_5.pth
+  
+args:
+  real: true
+  verbose: false
+  output_dir: ${PROJECT_ROOT}/logs
+  multi_run: true 
+
+multi_run:
+  0:
+  8:
+  16:
+  32:
+  48:
+  64:
+
+# CUDA_VISIBLE_DEVICES=5 python cofai/engine/run_eval.py examples/pca_align/plan/mmstar__qwen3vl-8b-ins-slot9__pca-align__vqa.yaml --multirun
