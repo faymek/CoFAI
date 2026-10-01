@@ -2,30 +2,53 @@ name: Documentation
 on:
   push:
     branches:
-      - master
       - main
       - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/configure-pages@v5
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
-          python-version: 3.x
-      - run: pip install zensical
-      - run: pip install mkdocstrings-python
-      - run: zensical build --clean 
+          python-version: '3.10'
+      - run: python -m pip install poetry==1.8.3
+      - run: poetry install --only docs --no-root --no-interaction
+      - run: poetry run zensical build --clean
+      - name: Verify generated documentation
+        run: |
+          test -s site/index.html
+          test -s site/api/models/index.html
+          test -s site/api/index_codecs/index.html
+          test -s site/api/token_grouping/index.html
+          test -s site/api/transforms/index.html
+          test -s site/api/engine/index.html
+          test -s site/api/utils/download/index.html
       - uses: actions/upload-pages-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           path: site
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
       - uses: actions/deploy-pages@v4
         id: deployment

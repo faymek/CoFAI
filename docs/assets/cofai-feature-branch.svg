@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="690" viewBox="0 0 1500 690" role="img" aria-labelledby="title desc">
+<title id="title">Feature branch: code a model split</title><desc id="desc">A model prefix extracts intermediate features at a split point. Optional token preparation produces feature values and indices. Feature and index streams are stored or transmitted and decoded. Optional post-processing restores task-required features for the model suffix and downstream tasks.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#53677c"/></marker></defs>
+<rect width="1500" height="690" fill="white"/>
+<text x="750.0" y="47.3" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="28" font-weight="600" fill="#53677c">Feature branch: code a model split</text>
+<text x="750.0" y="89.15" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#53677c">Compress intermediate features, then continue AI processing after decoding</text>
+<rect x="30" y="115" width="510" height="45" rx="12" fill="#eef5fc" stroke="#6e9ac5" stroke-width="1.6"/>
+<text x="285.0" y="144.15" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="600" fill="#24354b">Extract and prepare</text>
+<rect x="565" y="115" width="565" height="45" rx="12" fill="#fff6e8" stroke="#ceab6b" stroke-width="1.6"/>
+<text x="847.5" y="144.15" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="600" fill="#24354b">Encode → store / transmit → decode</text>
+<rect x="1155" y="115" width="315" height="45" rx="12" fill="#edf7f2" stroke="#74a992" stroke-width="1.6"/>
+<text x="1312.5" y="144.15" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="600" fill="#24354b">Resume the task</text>
+<rect x="30" y="212" width="95" height="100" rx="12" fill="#f6f8fb" stroke="#c4ceda" stroke-width="1.6"/>
+<text x="77.5" y="269.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Image</text>
+<rect x="155" y="212" width="150" height="100" rx="12" fill="#eef5fc" stroke="#6e9ac5" stroke-width="1.6"/>
+<text x="230.0" y="255.17499999999998" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="21" font-weight="600" fill="#24354b">Model</text>
+<text x="230.0" y="283.525" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="21" font-weight="600" fill="#24354b">prefix</text>
+<rect x="335" y="212" width="190" height="100" rx="12" fill="#f4effb" stroke="#9b83c2" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="430.0" y="243.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">Prepare tokens</text>
+<text x="430.0" y="268.65" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">select / group</text>
+<text x="430.0" y="294.3" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">(optional)</text>
+<rect x="565" y="212" width="135" height="100" rx="12" fill="#eef5fc" stroke="#6e9ac5" stroke-width="1.6"/>
+<text x="632.5" y="255.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Feature</text>
+<text x="632.5" y="282.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">encoder</text>
+<rect x="735" y="212" width="155" height="100" rx="12" fill="#fff6e8" stroke="#ceab6b" stroke-width="1.6"/>
+<text x="812.5" y="255.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Feature</text>
+<text x="812.5" y="282.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">stream</text>
+<rect x="925" y="212" width="135" height="100" rx="12" fill="#eef5fc" stroke="#6e9ac5" stroke-width="1.6"/>
+<text x="992.5" y="255.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Feature</text>
+<text x="992.5" y="282.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">decoder</text>
+<rect x="1100" y="212" width="180" height="100" rx="12" fill="#f4effb" stroke="#9b83c2" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="1190.0" y="243.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">Post-process</text>
+<text x="1190.0" y="268.65" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">restore / adapt</text>
+<text x="1190.0" y="294.3" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">(optional)</text>
+<rect x="1320" y="212" width="150" height="100" rx="12" fill="#edf7f2" stroke="#74a992" stroke-width="1.6"/>
+<text x="1395.0" y="256.475" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="600" fill="#24354b">Model suffix</text>
+<text x="1395.0" y="279.425" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="600" fill="#24354b">Task module</text>
+<polyline points="125,262 155,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="305,262 335,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="525,262 565,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="700,262 735,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="890,262 925,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="1060,262 1100,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="1280,262 1320,262" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="345.0" y="190.25" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="400" fill="#53677c">split point</text>
+<rect x="565" y="370" width="135" height="80" rx="12" fill="#f4effb" stroke="#9b83c2" stroke-width="1.6"/>
+<text x="632.5" y="403.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Index</text>
+<text x="632.5" y="430.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">encoder</text>
+<rect x="735" y="370" width="155" height="80" rx="12" fill="#fff6e8" stroke="#ceab6b" stroke-width="1.6"/>
+<text x="812.5" y="403.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Index</text>
+<text x="812.5" y="430.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">side stream</text>
+<rect x="925" y="370" width="135" height="80" rx="12" fill="#f4effb" stroke="#9b83c2" stroke-width="1.6"/>
+<text x="992.5" y="403.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">Index</text>
+<text x="992.5" y="430.5" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="400" fill="#24354b">decoder</text>
+<polyline points="430,312 430,410 565,410" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="320.0" y="359.8" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="400" fill="#53677c">selected token</text>
+<text x="320.0" y="381.40000000000003" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="400" fill="#53677c">indices</text>
+<polyline points="700,410 735,410" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="890,410 925,410" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="1060,410 1190,410 1190,312" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="1285" y="357" width="200" height="100" rx="12" fill="#edf7f2" stroke="#74a992" stroke-width="1.6"/>
+<text x="1385.0" y="390.0" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="400" fill="#24354b">Task outputs</text>
+<text x="1385.0" y="412.95" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="400" fill="#24354b">class / mask / depth</text>
+<text x="1385.0" y="435.9" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" font-weight="400" fill="#24354b">image / answer</text>
+<polyline points="1395,312 1395,357" fill="none" stroke="#53677c" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="812.5" y="485.25" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="400" fill="#53677c">Count both streams in the rate</text>
+<text x="315.0" y="495.25" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="400" fill="#53677c">Dashed boxes: optional processing interfaces; index path used when needed.</text>
+<rect x="30" y="535" width="700" height="65" rx="12" fill="#eef5fc" stroke="#6e9ac5" stroke-width="1.6"/>
+<text x="380.0" y="574.15" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">Transmit: device extracts features → server resumes processing</text>
+<rect x="760" y="535" width="710" height="65" rx="12" fill="#edf7f2" stroke="#74a992" stroke-width="1.6"/>
+<text x="1115.0" y="574.15" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="400" fill="#24354b">Store: save coded features → reuse across runs or tasks</text>
+<rect x="30" y="625" width="1440" height="40" rx="12" fill="#f6f8fb" stroke="#c4ceda" stroke-width="1.6"/>
+<text x="750.0" y="651.3" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" font-weight="400" fill="#24354b">Evaluate under the same conditions: task quality • coded size • encoding / decoding time • codec complexity</text>
+</svg>

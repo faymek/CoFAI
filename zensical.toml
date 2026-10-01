@@ -6,13 +6,17 @@ site_url = "https://faymek.github.io/CoFAI"
 
 nav = [
   { "Home" = "index.md" },
-  { "Framework" = "framework.md" },
-  { "Engine" = "engine.md" },
+  { "Concepts" = "framework.md" },
+  { "Reference Software" = "reference_software.md" },
+  { "Evaluation Engine" = "engine.md" },
   { "API Reference" = [
     "api/models.md",
     "api/backbone.md",
     "api/latent_codecs.md",
     "api/index_codecs.md",
+    "api/token_grouping.md",
+    "api/transforms.md",
+    "api/engine.md",
     "api/heads.md",
     "api/layers.md",
     "api/datasets.md",
@@ -24,6 +28,7 @@ nav = [
       "api/utils/tensor_ops.md",
       "api/utils/stream_helper.md",
       "api/utils/debug.md",
+      "api/utils/download.md",
     ] },
   ] },
 ]
@@ -47,7 +52,7 @@ custom_fences = [
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]
-paths = ["src"]
+paths = ["."]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"
