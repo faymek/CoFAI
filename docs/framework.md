@@ -43,7 +43,7 @@ CoFAI 将视觉场景的可编码信息归纳为三类表征。它们可以单�
 
 **整体三分支视图**
 
-![CoFAI 三类表征的编码、存储传输与任务使用](assets/cofai-overview.svg)
+![CoFAI 三类表征的编码、上下文关系与任务使用](assets/cofai-framework.svg)
 
 三条分支可以独立使用，也可以组合使用。上下文由具体方案选择，并需要明确编码端
 和解码端如何获得它；图中的上下文集合不意味着任意分支都自动拥有其它分支的数据。
@@ -106,6 +106,8 @@ flowchart LR
 
 ![单层单帧、多层单帧与多层多帧方案关系](assets/coding-scheme-levels.png)
 
+图中的纵向箭头表示同一帧内的层间依赖，跨帧箭头表示时间依赖。DataUnitCodec、LayeredFrameCodec 和 LayeredVideoCodec 是方案层级的概念名称，不表示当前软件中存在同名稳定类。
+
 这是一种框架分类，不代表参考软件已经以同等成熟度实现了三个层级。当前代码以
 单层单帧特征评测最成熟，多层和视频能力仍包含方法专用实现与探索性接口。
 
@@ -114,7 +116,13 @@ flowchart LR
 Feature DU 在模型切分点编码基础模型的中间特征。前缀网络位于编码侧，后缀网络和
 任务头位于解码侧。
 
-![特征分支：模型切分、特征与索引编解码、后处理与任务继续执行](assets/cofai-feature-branch.svg)
+![通用特征编码概念：特征与索引双路径、token 预处理和预留后处理接口](assets/common-feature-codec-model.png)
+
+这张图描述完整的功能边界，而不是当前软件已实现的类结构。Token 预处理目前由具体 backbone 的 `encode` 承担；Token 后处理对应预留的 `post_process` 接口，目前必须为 `None`。特征流、索引流与解码结果的实际处理见[参考软件实现](reference_software.md#7-token-grouping-and-multi-stream-data-units)。
+
+模型前缀/后缀切分和传输、存储部署方式如下。图中浅层与深层切分是示例，具体切分点和特征复用能力由方法决定。
+
+![特征编码管线及面向传输、存储的部署方式](assets/cofai-feature-deployment.svg)
 
 抽象流程为：
 

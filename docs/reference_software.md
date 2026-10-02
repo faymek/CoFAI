@@ -121,9 +121,7 @@ Use slot names in plan names, configuration fields, and reports. When citing lay
 
 Token grouping produces compact features and discrete indices describing selection or grouping relationships.
 
-![Conceptual CommonFeatureCodecModel boundaries](assets/common-feature-codec-model.png)
-
-This conceptual diagram includes token preprocessing, separate feature and mask/index coding, and token restoration before the task module. It does not imply that every operation is implemented as a separate component. Token preprocessing currently belongs to the relevant backbone's `encode` method. `post_process` is a reserved extension point: it must currently be `None`, with no executable implementation or stable invocation contract.
+The [conceptual feature-branch diagram](framework.md#6-feature-du) includes token preprocessing, separate feature and mask/index coding, and token restoration before the task module. It does not imply that every operation is implemented as a separate component. Token preprocessing currently belongs to the relevant backbone's `encode` method. `post_process` is a reserved extension point: it must currently be `None`, with no executable implementation or stable invocation contract.
 
 The experimental `CommonFeatureCodecModel` currently follows these rules:
 
