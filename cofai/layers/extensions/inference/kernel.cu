@@ -94,7 +94,12 @@ process_with_mask_dispatcher(torch::Tensor& y_res, torch::Tensor& y_q, torch::Te
                              const torch::Tensor& scales, const torch::Tensor& means,
                              const torch::Tensor& mask, const float force_zero_thres)
 {
-    auto [blockDim, gridDim, stream, useVec, biasSafe, N, HW] = get_kernel_launch_info<vec_t>(y);
+    const auto launch_info = get_kernel_launch_info<vec_t>(y);
+    const auto blockDim = std::get<0>(launch_info);
+    const auto gridDim = std::get<1>(launch_info);
+    const auto stream = std::get<2>(launch_info);
+    const auto useVec = std::get<3>(launch_info);
+    const auto N = std::get<5>(launch_info);
     const bool force_zero = force_zero_thres > 0.f;
 
     auto launch_kernel = [&](auto in_v) {
@@ -312,7 +317,12 @@ build_index_dec_dispatcher(torch::Tensor& out, torch::optional<torch::Tensor>& c
                            const scalar_t scale_max, const scalar_t log_scale_min,
                            const scalar_t log_step_recip, const scalar_t skip_thres)
 {
-    auto [blockDim, gridDim, stream, useVec, N] = get_kernel_launch_info_flatten<vec_t>(scales);
+    const auto launch_info = get_kernel_launch_info_flatten<vec_t>(scales);
+    const auto blockDim = std::get<0>(launch_info);
+    const auto gridDim = std::get<1>(launch_info);
+    const auto stream = std::get<2>(launch_info);
+    const auto useVec = std::get<3>(launch_info);
+    const auto N = std::get<4>(launch_info);
     const bool with_cond = static_cast<float>(skip_thres) > 0.f;
 
     auto launch_kernel = [&](auto in_v, auto out_v, auto cond_out_v) {
@@ -380,7 +390,12 @@ __forceinline__ void build_index_enc_dispatcher(
     const torch::Tensor& scales, const scalar_t scale_min, const scalar_t scale_max,
     const scalar_t log_scale_min, const scalar_t log_step_recip, const scalar_t skip_thres)
 {
-    auto [blockDim, gridDim, stream, useVec, N] = get_kernel_launch_info_flatten<vec_t>(scales);
+    const auto launch_info = get_kernel_launch_info_flatten<vec_t>(scales);
+    const auto blockDim = std::get<0>(launch_info);
+    const auto gridDim = std::get<1>(launch_info);
+    const auto stream = std::get<2>(launch_info);
+    const auto useVec = std::get<3>(launch_info);
+    const auto N = std::get<4>(launch_info);
     const bool with_cond = static_cast<float>(skip_thres) > 0.f;
 
     auto launch_kernel = [&](auto in_v, auto out_v, auto cond_out_v) {

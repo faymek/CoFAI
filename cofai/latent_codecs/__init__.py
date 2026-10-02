@@ -1,6 +1,6 @@
 from .hyperprior import FeatureScaleHyperprior, HyperLatentCodecWithCtx, HyperpriorLatentCodecWithCtx
 from .vit_feature_codec import VitUnionLatentCodec, VitUnionLatentCodecWithCtx, VitSeparateLatentCodec, VbrVitSeparateLatentCodec
-from .vtc import VisualTokenCodec
+from .vtc import VisualTokenCodec, VTCLight
 from .vtm import VtmCodec, VtmFeatureCodec, VtmLatentCodec
 from .mlore_codec import MLoREFeatureCodec, MLoREFeatureCodecLight
 from .bypass import BypassLatentCodec
@@ -26,6 +26,7 @@ __all__ = [
     "VtmFeatureCodec",
     "VtmLatentCodec",
     "VisualTokenCodec",
+    "VTCLight",
     # MLoRE/RFC components
     "MLoREFeatureCodec",
     "MLoREFeatureCodecLight",
