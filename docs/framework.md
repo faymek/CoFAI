@@ -1,130 +1,111 @@
-# CoFAI 框架概念
+# CoFAI Framework Concepts
 
-CoFAI（Coding for AI）面向机器感知、理解与生成任务，研究如何对 AI 系统所需的
-多种视觉表征进行统一组织、编码、传输和复用。它不只是一套“压缩某层特征”的算法
-集合，而是一个从表征类型、上下文关系、码流组织到任务评测的参考框架。
+CoFAI (Coding for AI) studies how to organize, code, transmit, and reuse visual representations for AI perception, understanding, and generation. It is not limited to algorithms for compressing features at a particular model layer: it provides a reference framework covering representation types, context dependencies, coded-data organization, and task evaluation.
 
-本文描述长期稳定的概念模型。当前参考软件对这些概念的实现范围和对应代码见
-[参考软件实现](reference_software.md)；评测入口、plan 和数据契约见
-[Engine 架构与数据流](engine.md)。
+This guide describes the conceptual framework and the encoder semantic conventions used to organize its representations, coded streams, and decoding state. See the [reference software implementation](reference_software.md) for current coverage and component mappings, and the [evaluation engine guide](engine.md) for plans, execution, and evaluation data contracts.
 
-## 1. 目标与边界
+## 1. Goals and Scope
 
-传统图像和视频编码主要服务于人眼观看。面向 AI 的编码还需要考虑：
+Traditional image and video coding primarily targets human viewing. Coding for AI also needs to address:
 
-- 中间表征是否能被多个任务或模型复用；
-- 端侧与云侧如何在模型切分点交换紧凑表征；
-- 像素、基础模型特征和结构化语义如何联合编码；
-- 层间与帧间上下文如何提升编码效率；
-- 不同方案能否在一致的数据、预处理、码率和任务指标下公平比较。
+- Whether intermediate representations can be reused across tasks or models.
+- How devices exchange compact representations at model split points.
+- How pixels, foundation-model features, and structured semantics can be coded jointly.
+- How cross-layer and temporal context can improve coding efficiency.
+- How methods can be compared using consistent data, preprocessing, bitrate definitions, and task metrics.
 
-CoFAI 同时覆盖两类典型部署场景：
+CoFAI covers two typical deployment patterns:
 
-1. **存储与特征复用**：特征被离线保存，供多个下游任务或模型重复使用。
-2. **端云协同**：模型在某个切分点分为端侧前缀和云侧后缀，编码后的中间表征在
-   设备间传输，用于即时推理或后续训练。
+1. **Storage and feature reuse**: features are saved offline for repeated use by downstream tasks or models.
+2. **Edge–cloud collaboration**: a model is split into a device-side prefix and a server-side suffix; coded intermediate representations are exchanged for inference or subsequent training.
 
-框架关注三类任务：
+The framework supports three task families:
 
-- **Perception**：分类、分割、检测、检索等感知任务；
-- **Understanding**：视觉问答、异常检测等理解任务；
-- **Generation**：图像重建和其它生成任务。
+- **Perception**: classification, segmentation, detection, and retrieval.
+- **Understanding**: visual question answering and anomaly detection.
+- **Generation**: image reconstruction and other generation tasks.
 
-## 2. 三类表征数据
+## 2. Three Representation Types
 
-CoFAI 将视觉场景的可编码信息归纳为三类表征。它们可以单独形成编码层，也可以在
-同一个访问单元中联合出现。
+CoFAI groups codable visual information into three representation types. They can be coded independently or together; their coding-unit organization is described in [Coded-Data Organization](#5-coded-data-organization).
 
-| 表征 | 含义 | 典型示例 |
+| Representation | Meaning | Examples |
 |---|---|---|
-| 结构数据 | 已提取的离散或结构化语义 | 文本、目标、分割、运动、token 选择索引 |
-| 基础视觉模型特征 | 模型切分点上的连续或离散中间表征 | DINO、SigLIP、视觉语言模型和 ReID token |
-| 图像数据 | 可供人眼观看或用于重建、生成的像素表征 | 原始图像、重建图像、视频帧 |
+| Structured data | Extracted discrete or structured semantics | Text, bounding boxes, segmentation masks, keypoints, motion |
+| Foundation-model features | Continuous or discrete intermediate representations at a model split point | DINO, SigLIP, vision-language model features, ReID tokens |
+| Image pixels | Pixel representations for viewing, reconstruction, or generation | Original images, reconstructed images, video frames |
 
-**整体三分支视图**
+![CoFAI representation branches, context relationships, and downstream tasks](assets/cofai-framework.svg)
 
-![CoFAI 三类表征的编码、上下文关系与任务使用](assets/cofai-framework.svg)
+The branches can be used independently or together. Each method selects its context and specifies how both encoder and decoder obtain it. The context shown in the diagram does not imply that every branch automatically has access to the others.
 
-三条分支可以独立使用，也可以组合使用。上下文由具体方案选择，并需要明确编码端
-和解码端如何获得它；图中的上下文集合不意味着任意分支都自动拥有其它分支的数据。
+Structural side information does not automatically form a separate structured-data layer. For example, token-selection indices may be an index stream within a Feature DU, describing how its compact features are interpreted. A structured representation carried as its own DU is distinct from side information carried within another representation's DU.
 
-“层”表示一种完整表征，不等同于神经网络中的 Transformer layer。为了避免混淆，
-神经网络切分位置统一使用 [slot](reference_software.md#6-slots-and-model-split-points) 描述。
+A representation layer is not a Transformer layer. Model split points are described using [slots](reference_software.md#6-slots-and-model-split-points) to avoid ambiguity.
 
-## 3. 上下文关系
+## 3. Context Relationships
 
-编码一个表征时，可以使用以下上下文：
+Coding a representation may use:
 
-- **表征内上下文**：同一表征内部的空间、通道、token 或概率依赖；
-- **层间上下文**：同一时刻其它表征层提供的条件信息；
-- **帧间上下文**：其它时间点的同层或跨层信息；
-- **超先验或外部先验**：由独立潜变量、模型参数或共享知识提供的概率条件。
+- **Within-representation context**: spatial, channel, token, or probability dependencies within a representation.
+- **Cross-layer context**: information from another representation layer at the same time point.
+- **Temporal context**: information from the same or another layer at a different time point.
+- **Hyperpriors or external priors**: probability conditions derived from separate latent variables, model parameters, or shared knowledge.
 
-上下文是可选依赖，不意味着所有解码端都必须恢复所有表征。具体方案需要明确：
+Context is an optional dependency; not every decoder must recover every representation. Each method should specify:
 
-1. 编码和解码依赖哪些上下文；
-2. 上下文是否进入码流；
-3. 解码顺序和缺失层时的行为；
-4. 上下文自身的码率如何统计。
+1. The context required for encoding and decoding.
+2. Whether that context is carried in the coded streams.
+3. The decoding order and behavior when a layer is missing.
+4. How the coding cost of the context itself is counted.
 
-## 4. 码流组织术语
+## 4. Coding Scheme Levels
+
+CoFAI distinguishes three progressively broader levels along the representation and temporal dimensions:
+
+| Level | Representations | Time points | Typical research scope |
+|---|---|---|---|
+| Single-layer, single-frame | One representation layer | One | Foundation-model feature coding, token coding |
+| Multi-layer, single-frame | Multiple jointly coded layers | One | Multi-layer features, joint visual and semantic coding |
+| Multi-layer, multi-frame | Multiple jointly coded layers | Multiple | Feature-video coding with cross-layer and temporal context |
+
+![Single-layer, single-frame; multi-layer, single-frame; and multi-layer, multi-frame coding](assets/coding-scheme-levels.png)
+
+Vertical context arrows show dependencies between layers in the same frame; cross-frame arrows show temporal dependencies. These levels classify coding schemes rather than prescribing concrete software classes.
+
+These levels describe the framework's scope, not implementation maturity. See [Framework Coverage](reference_software.md#10-framework-coverage) for the reference software's current support.
+
+## 5. Coded-Data Organization
+
+The representation and temporal dimensions above are organized through DUs, AUs, and layers:
 
 ![Multi-layer representation organization](assets/multi-layer-codec.png)
 
-| 术语 | 缩写 | 定义 |
+| Term | Abbreviation | Definition |
 |---|---|---|
-| Data Unit | DU | 承载某一时刻、某一种完整表征的基本编码单元 |
-| Access Unit | AU | 同一时刻所有 DU 的逻辑集合 |
-| Layer | Layer | 同一表征类型在时间维度上的逻辑层 |
-| Coded Layer Video Sequence | CLVS | 一个 CVS 中，同一层连续 DU 构成的序列 |
-| Coded Video Sequence | CVS | 按解码顺序组织的一组 AU |
+| Data Unit | DU | A basic coding unit carrying one complete representation at one time point |
+| Access Unit | AU | The logical collection of all DUs at the same time point |
+| Layer | Layer | A logical sequence of one representation type over time |
+| Coded Layer Video Sequence | CLVS | A sequence of consecutive DUs from one layer within a CVS |
+| Coded Video Sequence | CVS | A sequence of AUs in decoding order |
 
-单图实验可以只有一个 AU；只有一个表征时，AU 中只有一个 DU。即便参考实验尚未生成
-最终规范码流，也应使用这些术语描述表征边界和依赖关系。
+A single-layer, single-frame scheme may contain one DU in one AU. A multi-layer, single-frame scheme groups multiple DUs in that AU. A multi-layer, multi-frame scheme extends those layers across a sequence of AUs, with explicit cross-layer and temporal dependencies.
 
-## 5. 三种方案层级
-
-CoFAI 按表征维度和时间维度把方案分为三个逐步扩展的层级：
-
-| 层级 | 表征关系 | 时间关系 | 典型研究内容 |
-|---|---|---|---|
-| 单层单帧 | 一个表征层 | 一个时刻 | 基础模型特征编码、token 编码 |
-| 多层单帧 | 多个联合表征层 | 一个时刻 | 多层特征、视觉与语义联合编码 |
-| 多层多帧 | 多个联合表征层 | 多个时刻 | 层间与帧间联合的特征视频编码 |
-
-**简化示意**
-
-```mermaid
-flowchart LR
-  U[单层单帧<br/>Data Unit]
-  F[多层单帧<br/>Layered Frame]
-  V[多层多帧<br/>Layered Video]
-  U -->|增加表征层| F -->|增加时间依赖| V
-```
-
-**完整方案层级图**
-
-![单层单帧、多层单帧与多层多帧方案关系](assets/coding-scheme-levels.png)
-
-图中的纵向箭头表示同一帧内的层间依赖，跨帧箭头表示时间依赖。DataUnitCodec、LayeredFrameCodec 和 LayeredVideoCodec 是方案层级的概念名称，不表示当前软件中存在同名稳定类。
-
-这是一种框架分类，不代表参考软件已经以同等成熟度实现了三个层级。当前代码以
-单层单帧特征评测最成熟，多层和视频能力仍包含方法专用实现与探索性接口。
+These terms describe representation boundaries and dependencies even when an experiment does not yet produce a finalized normative bitstream. The [encoder semantic conventions](#7-encoder-semantic-conventions) below specify how coded streams and decoding state relate to these units.
 
 ## 6. Feature DU
 
-Feature DU 在模型切分点编码基础模型的中间特征。前缀网络位于编码侧，后缀网络和
-任务头位于解码侧。
+A Feature DU codes a foundation model's intermediate features at a split point. The model prefix runs on the encoding side; the suffix and task heads run on the decoding side.
 
-![通用特征编码概念：特征与索引双路径、token 预处理和预留后处理接口](assets/common-feature-codec-model.png)
+![Conceptual feature and index coding paths with token preprocessing and reserved postprocessing](assets/common-feature-codec-model.png)
 
-这张图描述完整的功能边界，而不是当前软件已实现的类结构。Token 预处理目前由具体 backbone 的 `encode` 承担；Token 后处理对应预留的 `post_process` 接口，目前必须为 `None`。特征流、索引流与解码结果的实际处理见[参考软件实现](reference_software.md#7-token-grouping-and-multi-stream-data-units)。
+This diagram describes functional boundaries rather than a required set of software classes. Preprocessing selects, groups, or transforms tokens into a representation suitable for coding. Feature coding carries their values; index coding carries selection or grouping relationships when needed. Postprocessing uses decoded features and side information to restore or adapt the representation required by the downstream model. These responsibilities remain part of the framework even when a particular implementation omits a step or reserves it for later development. See the [implementation guide](reference_software.md#7-token-grouping-and-multi-stream-data-units) for current behavior and reserved interfaces.
 
-模型前缀/后缀切分和传输、存储部署方式如下。图中浅层与深层切分是示例，具体切分点和特征复用能力由方法决定。
+The following diagram illustrates model splitting and transmission-oriented or storage-oriented deployment. Shallow and deep splits are examples; the split point and feature reuse capability depend on the method.
 
-![特征编码管线及面向传输、存储的部署方式](assets/cofai-feature-deployment.svg)
+![Feature coding pipeline and transmission-oriented or storage-oriented deployment](assets/cofai-feature-deployment.svg)
 
-抽象流程为：
+The conceptual sequence is:
 
 ```text
 image
@@ -136,12 +117,11 @@ image
   -> task heads
 ```
 
-其中预处理和后处理是可选步骤。例如 Token Grouping 可以在编码前选择紧凑 token，
-同时产生描述选择关系的索引；是否需要在解码后恢复稠密 token 网格由具体任务决定。
+Preprocessing and postprocessing are optional. For example, token grouping can select compact tokens before coding and produce indices describing the selection. Whether a dense token grid must be restored after decoding depends on the task.
 
-## 7. Coded Unit 语义
+## 7. Encoder Semantic Conventions
 
-研究阶段使用 `coded_unit` 表示一个 DU 的中间编码结果：
+`coded_unit` expresses the coding result for one DU: its named coded streams and the state required to interpret and decode them. `strings`, `pstate`, and the frame-wise or layer-wise container conventions are part of the encoder's semantic contract, closely tied to DU and AU organization. The dictionary examples illustrate that contract; they do not prescribe a finalized binary syntax.
 
 ```python
 coded_unit = {
@@ -150,21 +130,20 @@ coded_unit = {
         "selection_map": [[index_bytes]],
     },
     "pstate": {
-        # 解码所需、未来应映射到高层语法的状态
+        # State required for decoding; future mapping to high-level syntax.
     },
 }
 ```
 
-- **`strings`** 是可计入实际码率的 byte stream 映射。一个 DU 可以包含多个流，例如
-  主特征流、超先验流、prefix token 流或结构索引流。
-- **`pstate`** 是解码所需但尚未完成规范序列化的状态，例如形状、slot、QP、token
-  空间尺寸和组件参数。具体方案必须说明哪些状态最终需要进入高层语法并计入码率。
-- `strings` 的键描述流的语义，不应依赖字典顺序表达解码依赖。
+- **`strings`** maps stream names to byte streams counted in actual bitrate. A DU may contain feature, hyperprior, prefix-token, and structural-index streams.
+- **`pstate`** contains decoding state that has not yet been fully serialized into standardized syntax, such as shapes, slots, QP, token-grid dimensions, and component parameters. Each method must identify the state that ultimately belongs in high-level syntax and bitrate accounting.
+- Stream names express their semantics; dictionary order must not be used to express decoding dependencies.
 
-评测阶段还允许 codec 返回 `likelihoods` 或显式 `bits` 来估计码率。它们是统一评测
-接口，不等价于已经生成可互操作码流；正式结果应明确区分估计码率与真实 byte stream。
+Feature values and their selection indices can therefore occupy separate streams within the same DU without creating an additional representation layer. The DU remains the representation-level unit; streams describe the distinct coded contents inside it.
 
-多层或多帧结果可进一步组织为：
+For evaluation, a codec may also return `likelihoods` or explicit `bits` for estimated bitrate. These are evaluation interfaces, not evidence of an interoperable bitstream. Reports should distinguish estimated bitrate from actual byte-stream size.
+
+`coded_data` groups DUs according to representation and time. A `frame` container groups the representations at one time point, corresponding to the logical organization of an AU:
 
 ```python
 coded_data = {
@@ -176,30 +155,23 @@ coded_data = {
 }
 ```
 
-视频可以按帧组织为 `frame_wise_video`，也可以按层组织为 `layer_wise_video`。前者更
-接近解码和播放顺序，后者便于研究阶段按层访问。无论采用哪一种形式，都必须明确
-帧序、层序、依赖关系和缺失 DU 的处理规则。
+Video may be organized by frame as `frame_wise_video` or by layer as `layer_wise_video`. A frame-wise view groups DUs by time point into successive AUs; a layer-wise view groups the temporal DU sequence of each layer. They are organizational views of the same representation and temporal dimensions, not different representation types.
 
-## 8. 评测原则
+Frame-wise organization follows decoding and playback order more closely; layer-wise organization supports per-layer access during research. Both require explicit frame order, layer order, dependencies, and rules for missing DUs. The container layout alone neither establishes decoding order nor removes cross-layer or temporal dependencies.
 
-框架要求一次可复现评测至少固定以下条件：
+## 8. Evaluation Principles
 
-- 数据集、样本列表和预处理；
-- backbone、权重、slot 和特征语义；
-- codec 参数、真实或估计编码模式以及质量点；
-- 任务头、任务指标和输出后处理；
-- 像素数、特征数及 BPP/BPFP 分母定义；
-- 参数量、FLOPs、编解码时间、GPU 和软件环境；
-- 输出位置及完整的最终配置。
+Coding methods should be compared along three dimensions: downstream task quality, coding cost, and processing complexity. The coding cost should account for the feature streams, side information, and transmitted context required by the method, with explicit bitrate denominators. Estimated bitrate must be distinguished from actual byte-stream size.
 
-CoFAI 使用一份 plan 固定这些条件，使不同 codec 可以在相同协议下替换和比较。
-plan 是参考软件的实验描述机制，不是规范码流语法本身。
+Fair comparisons require consistent data, preprocessing, model conditions, tasks, and measurement procedures. Storage and transmission scenarios should also state the assumptions governing feature reuse and available context.
 
-## 9. 文档边界
+See the [evaluation engine guide](engine.md) for plans, metric contracts, profiling, and result files. Those execution mechanisms implement the evaluation protocol; they do not define normative bitstream syntax.
 
-- 本文回答“CoFAI 要描述什么、如何组织表征和码流”。
-- [参考软件实现](reference_software.md)回答“当前代码如何映射这些概念”。
-- [Engine 架构与数据流](engine.md)回答“如何构建并执行一次统一评测”。
-- 各 `examples/<method>/` 文档回答“具体方法如何训练、下载和复现”。
+## 9. Documentation Scope
 
-正式文档只维护框架定义、当前代码事实和已经落实到接口或评测协议的稳定约定。
+- This guide explains CoFAI representations, context relationships, coded-data organization, and encoder semantic conventions.
+- The [implementation guide](reference_software.md) maps those concepts to current code.
+- The [evaluation engine guide](engine.md) explains how to build and run shared evaluations.
+- Each `examples/<method>/` guide provides method-specific training, download, and reproduction instructions.
+
+Framework concepts and encoder semantics belong here. Implementation status belongs in the implementation guide; evaluation configuration and execution belong in the engine guide.

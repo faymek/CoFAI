@@ -1,19 +1,16 @@
 # CoFAI Documentation
 
-CoFAI 是面向 AI 感知、理解与生成任务的多表征编码参考框架与 PyTorch 评测平台。
-文档按“框架概念、当前实现、评测协议、API”分层组织，避免把长期概念、当前代码和
-具体方法复现混在一起。
+CoFAI is a multi-representation coding framework and PyTorch reference software for AI perception, understanding, and generation. The documentation separates framework concepts, current implementations, evaluation contracts, and API references from method-specific reproduction instructions.
 
-## 从这里开始
+## Start Here
 
-| 文档 | 回答的问题 |
+| Guide | What it explains |
 |---|---|
-| [CoFAI 框架概念](framework.md) | CoFAI 编码哪些表征，如何描述层、DU、AU、上下文和方案层级？ |
-| [参考软件实现](reference_software.md) | 当前代码怎样实现 backbone、codec、head、slot、多流 DU 和 Token Grouping？ |
-| [Engine 架构与数据流](engine.md) | 如何用 plan 构建并执行一次可复现评测？ |
+| [Framework concepts](framework.md) | Representation types, context, coding scheme levels, DU/AU organization, and encoder semantic conventions |
+| [Reference software implementation](reference_software.md) | Backbones, codecs, heads, slots, multi-stream DUs, and token grouping in current code |
+| [Evaluation engine](engine.md) | Plans, component building, data contracts, and reproducible evaluation |
 
-具体方法的数据、权重、训练和运行命令位于仓库的 `examples/<method>/`。根目录
-`README.md` 提供安装、Quick Start 和当前支持能力总览。
+Method-specific data, weights, training instructions, and commands are documented under `examples/<method>/`. The repository's root `README.md` provides installation instructions, a first evaluation example, and an overview of supported capabilities.
 
 ## Library API
 
@@ -30,4 +27,4 @@ CoFAI 是面向 AI 感知、理解与生成任务的多表征编码参考框架�
 - [cofai.losses](api/losses.md)
 - [cofai.metrics](api/metrics.md)
 - [cofai.utils](api/utils/utils.md)
-- [数据与权重下载工具](api/utils/download.md)
+- [Data and weight downloads](api/utils/download.md)
