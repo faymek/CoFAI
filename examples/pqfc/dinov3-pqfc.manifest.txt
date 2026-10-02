@@ -1,0 +1,18 @@
+# PQFC DINOv3 数据与权重清单 (cofai-download)
+#
+# 有变换分支复用 ORFC-2446 DINOv3 release zip（解压到 weights/orfc_2446/dinov3_vitl16_ori/）。
+# 无变换权重：weights/pqfc/dinov3_vitl16_noR/blk23_K{K}_e{d}_no_transform.npz（R=I，q1–q7，无 K512_e8）。
+
+# --- 数据集 ---
+data/ADE20K.zip  sha256:95253fe4
+data/NYU_subset_for_training_depth_head.zip  sha256:0762c3ea
+
+# --- DINOv3-Large backbone ---
+weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors  sha256:45172f20
+
+# --- 任务头 ---
+weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth  sha256:98cd2ec1
+weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth  sha256:e8931641
+
+# --- 有变换 codec：ORFC-2446 DINOv3 release ---
+weights/orfc_2446/dinov3_vitl16_ori.zip  sha256:8086eba833f4e10ed30e0f4e0e4778927e3b4fa9f9b23fd73726eaef3aa8237a
