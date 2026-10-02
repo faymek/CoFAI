@@ -1,12 +1,24 @@
 # CoFAI Documentation
 
-CoFAI is a multi-representation coding framework and PyTorch reference software for AI perception, understanding, and generation. The documentation separates framework concepts, current implementations, evaluation contracts, and API references from method-specific reproduction instructions.
+CoFAI (Coding for AI) is a framework for coding three types of visual representation: structured data, foundation-model features, and image pixels. These representations can be coded independently or together to reduce storage and transmission costs while preserving the information needed for AI perception, understanding, and generation.
+
+![CoFAI framework: structured data, foundation-model features, image pixels, context, and downstream tasks](assets/cofai-framework.svg)
+
+Feature coding is the current primary research focus of the reference software. It compresses intermediate features at a model split point for transmission between devices or storage and later reuse.
+
+## Feature Coding and Deployment
+
+![Feature coding pipeline and transmission-oriented or storage-oriented deployment](assets/cofai-feature-deployment.svg)
+
+A model prefix extracts features, a codec compresses and reconstructs them, and the model suffix and task module produce the downstream result. Transmission-oriented deployment exchanges features between a device and a server; storage-oriented deployment saves them for later use. The split point and feature reuse capability depend on the model and coding method.
+
+The documentation below separates framework concepts, current implementations, evaluation contracts, and API references from method-specific reproduction instructions.
 
 ## Start Here
 
 | Guide | What it explains |
 |---|---|
-| [Framework concepts](framework.md) | Representation types, context, coding scheme levels, DU/AU organization, and encoder semantic conventions |
+| [CoFAI Framework](framework.md) | Representation types, context, coding scheme levels, DU/AU organization, and encoder semantic conventions |
 | [Reference software implementation](reference_software.md) | Backbones, codecs, heads, slots, multi-stream DUs, and token grouping in current code |
 | [Evaluation engine](engine.md) | Plans, component building, data contracts, and reproducible evaluation |
 

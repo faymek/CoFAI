@@ -1,6 +1,6 @@
-# CoFAI Framework Concepts
+# CoFAI Framework
 
-CoFAI (Coding for AI) studies how to organize, code, transmit, and reuse visual representations for AI perception, understanding, and generation. It is not limited to algorithms for compressing features at a particular model layer: it provides a reference framework covering representation types, context dependencies, coded-data organization, and task evaluation.
+CoFAI (Coding for AI) studies how to organize, code, transmit, and reuse visual representations for AI perception, understanding, and generation. Its framework covers representation types, context dependencies, coded-data organization, and task evaluation.
 
 This guide describes the conceptual framework and the encoder semantic conventions used to organize its representations, coded streams, and decoding state. See the [reference software implementation](reference_software.md) for current coverage and component mappings, and the [evaluation engine guide](engine.md) for plans, execution, and evaluation data contracts.
 
@@ -37,11 +37,11 @@ CoFAI groups codable visual information into three representation types. They ca
 
 ![CoFAI representation branches, context relationships, and downstream tasks](assets/cofai-framework.svg)
 
-The branches can be used independently or together. Each method selects its context and specifies how both encoder and decoder obtain it. The context shown in the diagram does not imply that every branch automatically has access to the others.
+The branches can be used independently or together. Each method selects its context and specifies how both encoder and decoder obtain it.
 
-Structural side information does not automatically form a separate structured-data layer. For example, token-selection indices may be an index stream within a Feature DU, describing how its compact features are interpreted. A structured representation carried as its own DU is distinct from side information carried within another representation's DU.
+Structural information can be carried as a representation in its own DU or as side information within another DU. For example, token-selection indices may accompany feature values in a Feature DU, describing how its compact features are interpreted.
 
-A representation layer is not a Transformer layer. Model split points are described using [slots](reference_software.md#6-slots-and-model-split-points) to avoid ambiguity.
+A representation layer organizes one representation over time. Model split points use [slots](reference_software.md#6-slots-and-model-split-points) to identify tensor boundaries between Transformer layers.
 
 ## 3. Context Relationships
 
@@ -52,7 +52,7 @@ Coding a representation may use:
 - **Temporal context**: information from the same or another layer at a different time point.
 - **Hyperpriors or external priors**: probability conditions derived from separate latent variables, model parameters, or shared knowledge.
 
-Context is an optional dependency; not every decoder must recover every representation. Each method should specify:
+The context selected by a method determines its decoding dependencies. Each method should specify:
 
 1. The context required for encoding and decoding.
 2. Whether that context is carried in the coded streams.
@@ -71,9 +71,7 @@ CoFAI distinguishes three progressively broader levels along the representation 
 
 ![Single-layer, single-frame; multi-layer, single-frame; and multi-layer, multi-frame coding](assets/coding-scheme-levels.png)
 
-Vertical context arrows show dependencies between layers in the same frame; cross-frame arrows show temporal dependencies. These levels classify coding schemes rather than prescribing concrete software classes.
-
-These levels describe the framework's scope, not implementation maturity. See [Framework Coverage](reference_software.md#10-framework-coverage) for the reference software's current support.
+Vertical context arrows show dependencies between layers in the same frame; cross-frame arrows show temporal dependencies. See [Framework Coverage](reference_software.md#10-framework-coverage) for the reference software's support at each level.
 
 ## 5. Coded-Data Organization
 
@@ -91,37 +89,28 @@ The representation and temporal dimensions above are organized through DUs, AUs,
 
 A single-layer, single-frame scheme may contain one DU in one AU. A multi-layer, single-frame scheme groups multiple DUs in that AU. A multi-layer, multi-frame scheme extends those layers across a sequence of AUs, with explicit cross-layer and temporal dependencies.
 
-These terms describe representation boundaries and dependencies even when an experiment does not yet produce a finalized normative bitstream. The [encoder semantic conventions](#7-encoder-semantic-conventions) below specify how coded streams and decoding state relate to these units.
+These terms define representation boundaries and dependencies. The [encoder semantic conventions](#7-encoder-semantic-conventions) below specify how coded streams and decoding state relate to these units.
 
 ## 6. Feature DU
 
-A Feature DU codes a foundation model's intermediate features at a split point. The model prefix runs on the encoding side; the suffix and task heads run on the decoding side.
+A Feature DU carries the coded representation of visual features at a given time point, together with the side information and decoding state needed to interpret them. Its contents may include feature-value streams and, when required, index streams describing token selection or grouping.
 
 ![Conceptual feature and index coding paths with token preprocessing and reserved postprocessing](assets/common-feature-codec-model.png)
 
-This diagram describes functional boundaries rather than a required set of software classes. Preprocessing selects, groups, or transforms tokens into a representation suitable for coding. Feature coding carries their values; index coding carries selection or grouping relationships when needed. Postprocessing uses decoded features and side information to restore or adapt the representation required by the downstream model. These responsibilities remain part of the framework even when a particular implementation omits a step or reserves it for later development. See the [implementation guide](reference_software.md#7-token-grouping-and-multi-stream-data-units) for current behavior and reserved interfaces.
+The diagram shows the feature extraction, coding, and task-processing flow. The Feature DU carries the coded streams and decoding state produced and consumed by this flow.
 
-The following diagram illustrates model splitting and transmission-oriented or storage-oriented deployment. Shallow and deep splits are examples; the split point and feature reuse capability depend on the method.
+- **Feature values** are the primary coded content. Preprocessing may select, group, or transform the features into a representation suitable for coding.
+- **Index side information**, when needed, describes token selection or grouping and accompanies feature-value streams within the same DU.
+- **Decoding state** describes how to interpret and recover the feature representation, including its shape or token-grid organization. The method must specify which information is transmitted and which is available from shared configuration or context.
+- **Postprocessing** uses decoded features and side information to restore or adapt the representation required by the downstream model. Each method determines the preprocessing and postprocessing operations its representation requires.
 
-![Feature coding pipeline and transmission-oriented or storage-oriented deployment](assets/cofai-feature-deployment.svg)
+The next section describes how these contents are expressed through `strings` and `pstate`. See the [implementation guide](reference_software.md#7-token-grouping-and-multi-stream-data-units) for current behavior and reserved interfaces.
 
-The conceptual sequence is:
-
-```text
-image
-  -> backbone prefix
-  -> feature/token preprocessing
-  -> feature codec
-  -> feature/token postprocessing
-  -> backbone suffix
-  -> task heads
-```
-
-Preprocessing and postprocessing are optional. For example, token grouping can select compact tokens before coding and produce indices describing the selection. Whether a dense token grid must be restored after decoding depends on the task.
+Feature DUs support applications such as split-model inference and feature storage. Examples are shown in the [deployment overview](index.md#feature-coding-and-deployment).
 
 ## 7. Encoder Semantic Conventions
 
-`coded_unit` expresses the coding result for one DU: its named coded streams and the state required to interpret and decode them. `strings`, `pstate`, and the frame-wise or layer-wise container conventions are part of the encoder's semantic contract, closely tied to DU and AU organization. The dictionary examples illustrate that contract; they do not prescribe a finalized binary syntax.
+`coded_unit` expresses the coding result for one DU: its named coded streams and the state required to interpret and decode them. `strings`, `pstate`, and the frame-wise or layer-wise container conventions define the encoder's semantic contract in relation to DU and AU organization. The following examples express this contract as dictionaries; binary syntax specifies how its fields are serialized.
 
 ```python
 coded_unit = {
@@ -130,18 +119,18 @@ coded_unit = {
         "selection_map": [[index_bytes]],
     },
     "pstate": {
-        # State required for decoding; future mapping to high-level syntax.
+        # State required to interpret and decode the streams.
     },
 }
 ```
 
 - **`strings`** maps stream names to byte streams counted in actual bitrate. A DU may contain feature, hyperprior, prefix-token, and structural-index streams.
-- **`pstate`** contains decoding state that has not yet been fully serialized into standardized syntax, such as shapes, slots, QP, token-grid dimensions, and component parameters. Each method must identify the state that ultimately belongs in high-level syntax and bitrate accounting.
-- Stream names express their semantics; dictionary order must not be used to express decoding dependencies.
+- **`pstate`** contains the state required to interpret and decode the streams, such as shapes, slots, QP, token-grid dimensions, and component parameters. Each method identifies which state is carried in high-level syntax and counted in bitrate, and which is supplied by shared configuration or context.
+- Stream names identify their semantic roles. Decoding dependencies are specified explicitly.
 
-Feature values and their selection indices can therefore occupy separate streams within the same DU without creating an additional representation layer. The DU remains the representation-level unit; streams describe the distinct coded contents inside it.
+The DU is the representation-level unit; its streams describe distinct coded contents. Feature values and selection indices can occupy separate streams within one Feature DU.
 
-For evaluation, a codec may also return `likelihoods` or explicit `bits` for estimated bitrate. These are evaluation interfaces, not evidence of an interoperable bitstream. Reports should distinguish estimated bitrate from actual byte-stream size.
+For evaluation, a codec may also return `likelihoods` or explicit `bits` for estimated bitrate. Reports should distinguish these estimates from actual byte-stream size.
 
 `coded_data` groups DUs according to representation and time. A `frame` container groups the representations at one time point, corresponding to the logical organization of an AU:
 
@@ -155,9 +144,9 @@ coded_data = {
 }
 ```
 
-Video may be organized by frame as `frame_wise_video` or by layer as `layer_wise_video`. A frame-wise view groups DUs by time point into successive AUs; a layer-wise view groups the temporal DU sequence of each layer. They are organizational views of the same representation and temporal dimensions, not different representation types.
+Video may be organized by frame as `frame_wise_video` or by layer as `layer_wise_video`. A frame-wise view groups DUs by time point into successive AUs; a layer-wise view groups the temporal DU sequence of each layer. Both organize the representation and temporal dimensions of coded data.
 
-Frame-wise organization follows decoding and playback order more closely; layer-wise organization supports per-layer access during research. Both require explicit frame order, layer order, dependencies, and rules for missing DUs. The container layout alone neither establishes decoding order nor removes cross-layer or temporal dependencies.
+Frame-wise organization follows decoding and playback order more closely; layer-wise organization supports per-layer access during research. Each method specifies its decoding schedule, frame and layer order, dependencies, and rules for missing DUs.
 
 ## 8. Evaluation Principles
 
@@ -165,7 +154,7 @@ Coding methods should be compared along three dimensions: downstream task qualit
 
 Fair comparisons require consistent data, preprocessing, model conditions, tasks, and measurement procedures. Storage and transmission scenarios should also state the assumptions governing feature reuse and available context.
 
-See the [evaluation engine guide](engine.md) for plans, metric contracts, profiling, and result files. Those execution mechanisms implement the evaluation protocol; they do not define normative bitstream syntax.
+See the [evaluation engine guide](engine.md) for plans, metric contracts, profiling, and result files.
 
 ## 9. Documentation Scope
 

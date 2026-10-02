@@ -160,7 +160,7 @@ Multi-quality evaluation also writes `summary.json` and one `q<qp>/` directory p
 
 Multi-task samples may contain images, several annotation types, and metadata. Using dictionaries and key-driven transforms supports these combinations without a separate pipeline for every task set.
 
-This design follows the dictionary-based sample and packing approach used in [MMEngine](https://github.com/open-mmlab/mmengine). The evaluation implementation remains limited to `EvalBatch` and a lightweight `collate_fn`, without introducing a full runner/hook system.
+This design follows the dictionary-based sample and packing approach used in [MMEngine](https://github.com/open-mmlab/mmengine). The evaluation path uses `EvalBatch` and a lightweight `collate_fn` to pack shared inputs and per-sample data.
 
 1. **Datasets return dictionaries** containing `img`, image `meta`, and optional payloads matching evaluator task kinds. VQA prompts, questions, answers, options, and categories all belong under `vqa`.
 2. **Transforms operate on keys**. Transforms such as `PadToMultiple` and `ToTensor` use `keys: [img, semseg, ...]` to coordinate geometry and dtype handling across fields. Their output remains a dictionary.

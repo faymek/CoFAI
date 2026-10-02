@@ -6,7 +6,7 @@ site_url = "https://faymek.github.io/CoFAI"
 
 nav = [
   { "Home" = "index.md" },
-  { "Concepts" = "framework.md" },
+  { "CoFAI Framework" = "framework.md" },
   { "Reference Software" = "reference_software.md" },
   { "Evaluation Engine" = "engine.md" },
   { "API Reference" = [

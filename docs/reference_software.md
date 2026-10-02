@@ -1,6 +1,6 @@
 # CoFAI Reference Software Implementation
 
-This guide explains how the reference software implements the [CoFAI framework](framework.md). It describes component responsibilities, public interfaces, and implementation limits. Method-specific guides remain the source for reproduction instructions; experimental interfaces are not presented as stable APIs.
+This guide explains how the reference software implements the [CoFAI framework](framework.md), including component responsibilities, public interfaces, and implementation status. Method-specific guides provide reproduction instructions.
 
 See the [evaluation engine guide](engine.md) for the contracts governing plans, datasets, transforms, task meters, and result files.
 
@@ -37,7 +37,7 @@ flowchart TB
 | `cofai.metrics` | Task metrics and per-sample aggregation | Accuracy, mIoU, depth, VQA, image quality |
 | `cofai.engine` | Plan execution and shared evaluation contracts | Registry, EvalBatch, bitrate, profiling |
 
-`token_codecs` is no longer a public namespace. Feature-value coding belongs to `latent_codecs`; discrete-index coding belongs to `index_codecs`. This distinction follows the data semantics rather than a particular coding method.
+Feature-value coding belongs to `latent_codecs`; discrete-index coding belongs to `index_codecs`. These namespaces replace the earlier `token_codecs` namespace and distinguish the semantics of the coded data.
 
 ## 3. Model Orchestration
 
@@ -121,7 +121,7 @@ Use slot names in plan names, configuration fields, and reports. When citing lay
 
 Token grouping produces compact features and discrete indices describing selection or grouping relationships.
 
-The [conceptual feature-branch diagram](framework.md#6-feature-du) includes token preprocessing, separate feature and mask/index coding, and token restoration before the task module. It does not imply that every operation is implemented as a separate component. Token preprocessing currently belongs to the relevant backbone's `encode` method. `post_process` is a reserved extension point: it must currently be `None`, with no executable implementation or stable invocation contract.
+The [conceptual feature-branch diagram](framework.md#6-feature-du) includes token preprocessing, separate feature and mask/index coding, and token restoration before the task module. In the current implementation, token preprocessing belongs to the relevant backbone's `encode` method. `post_process` is a reserved, unimplemented extension point and must currently be `None`.
 
 The experimental `CommonFeatureCodecModel` currently follows these rules:
 
@@ -178,7 +178,7 @@ coded_unit = {
 }
 ```
 
-`selection_map` and `feature` are distinct streams within one DU, without an additional nested codec container. Shared bitrate accounting reports each stream and their total.
+`selection_map` and `feature` are distinct named streams within one DU. Shared bitrate accounting reports each stream and their total.
 
 The GPS ReID decoder consumes compact token sequences directly rather than restoring a complete two-dimensional grid. Dense token restoration remains part of the architecture through the reserved, unimplemented `post_process` interface.
 
@@ -194,7 +194,7 @@ The GPS ReID decoder consumes compact token sequences directly rather than resto
 
 Actual stream size is computed from the total byte lengths. `bits_from_coded_data` supports `unit`, `frame`, `frame_wise_video`, `layer_wise_video`, and `slide_crops` containers.
 
-These containers support shared evaluation and bitrate aggregation. Not all `pstate` information is serialized into standardized high-level syntax. The current CodedUnit is a research-stage intermediate representation, not a finalized interoperable bitstream format.
+These containers implement the [encoder semantic conventions](framework.md#7-encoder-semantic-conventions) and support shared evaluation and bitrate aggregation. Complete serialization of `pstate` into interoperable high-level bitstream syntax remains under development.
 
 ## 9. Evaluation Engine and Plans
 

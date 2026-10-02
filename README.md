@@ -27,7 +27,7 @@ The lower half of the figure shows two ways to deploy this pipeline:
 - **Transmission-oriented**: a device runs the model prefix and encoder, then sends the compressed features to a server that decodes them and completes the task.
 - **Storage-oriented**: compressed features are saved for later use. After decoding, they can support machine-vision tasks or vision-language models.
 
-The shallow and deep splits shown are examples, not requirements. The split point and whether features can be reused depend on the model and coding method. Snowflake symbols mark components whose weights remain fixed rather than being updated during training in the illustrated setup.
+The split point and feature reuse capability depend on the model and coding method. The diagram illustrates shallow and deep splits; snowflake symbols mark components whose weights are fixed during training.
 
 ## Reference Software
 
@@ -112,7 +112,7 @@ Variable-rate codecs provide several compression settings so that you can compar
 
 ## Common Test Conditions
 
-**CTC** means common test conditions: a shared choice of model, dataset, and evaluation settings used to compare coding methods. These are evaluation conditions, not coding methods. AI M2462 defines the following reference test conditions:
+**CTC** means common test conditions: a shared choice of model, dataset, and evaluation settings used to compare coding methods. AI M2462 defines the following reference test conditions:
 
 - [DINOv3 CTC](examples/ctc/README-DINOv3.md): ADE20K segmentation, NYUv2 depth, and codec profiling.
 - [Qwen3-VL CTC](examples/ctc/README-QWEN3VL.md): visual question answering on MMStar with compressed intermediate vision features.
