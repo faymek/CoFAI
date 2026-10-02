@@ -82,8 +82,8 @@ setuptools = ">=65.0"
 optional = true
 
 [tool.poetry.group.docs.dependencies]
-zensical = "*"
-mkdocstrings-python = "*"
+zensical = "0.0.67"
+mkdocstrings-python = "2.0.9"
 
 [[tool.poetry.source]]
 name = "pytorch-cu124"
@@ -112,5 +112,4 @@ cofai-download = "cofai.utils.download:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
 
