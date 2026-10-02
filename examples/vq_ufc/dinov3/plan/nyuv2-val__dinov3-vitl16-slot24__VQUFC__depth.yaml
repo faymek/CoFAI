@@ -1,0 +1,132 @@
+# @package _global_
+# Load with cofai-eval --config-dir=examples/vq_ufc/dinov3/plan --config-name=<name>.
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: nyuv2-val__dinov3-vitl16-slot24__VQUFC__depth
+description: "Data: NYUv2 val; Model: DINOv3 ViT-L/16 slot24; Codec: VQ-UFC; Task: depth estimation"
+args:
+  real: true
+  quality: T01_N20
+  multi_run: true
+  output_dir: ${PROJECT_ROOT}/logs/vq_ufc/dinov3/nyuv2_val
+dataset:
+  type: NYUDepthDataset
+  root: ${PROJECT_ROOT}/data/NYU
+  split_file: nyu_test.txt
+test_transforms:
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img]
+  - type: cofai.transforms.ToTensor
+    keys: [img]
+collate:
+  mode: stack_only
+task_configs:
+  - label: depth
+    meter:
+      type: Dinov3DepthEstimationMeter
+      names: [rmse, abs_rel, a1]
+      min_depth: 0.001
+      max_depth: 10.0
+      ignored_value: 0.0
+      eval_mask: NYU_EIGEN
+      normalization_constant: 1000.0
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: 24
+    n_last_blocks: 1
+    cast_dtype: float16
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+  dino_codec:
+    type: cofai.latent_codecs.VQUFCFeatureCodec
+    checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T01_N20.pth.tar
+  heads:
+    depth:
+      type: Dinov3DepthHead
+      in_channels: [1024]
+      min_depth: 0.001
+      max_depth: 10.0
+      n_output_channels: 256
+      use_backbone_norm: true
+      use_batchnorm: true
+      use_cls_token: false
+      bins_strategy: linear
+      norm_strategy: linear
+      checkpoint: ${PROJECT_ROOT}/weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
+
+# Each point selects its own checkpoint; cofai-eval runs these sequentially.
+multi_run:
+  T01_N20:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T01_N20.pth.tar
+  T02_N48:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T02_N48.pth.tar
+  T03_N72:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T03_N72.pth.tar
+  T04_N96:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T04_N96.pth.tar
+  T05_N120:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T05_N120.pth.tar
+  T06_N144:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T06_N144.pth.tar
+  T07_N192:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T07_N192.pth.tar
+  T08_N240:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T08_N240.pth.tar
+  S01_N20:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S01_N20.pth.tar
+  S02_N48:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S02_N48.pth.tar
+  S03_N72:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S03_N72.pth.tar
+  S04_N96:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S04_N96.pth.tar
+  S05_N120:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S05_N120.pth.tar
+  S06_N144:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S06_N144.pth.tar
+  S07_N192:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S07_N192.pth.tar
+  S08_N240:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S08_N240.pth.tar

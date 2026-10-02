@@ -1,0 +1,128 @@
+# @package _global_
+# Load with cofai-eval --config-dir=examples/vq_ufc/dinov3/plan --config-name=<name>.
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: ade20k-val__dinov3-vitl16-slot24__VQUFC__semseg
+description: "Data: ADE20K val; Model: DINOv3 ViT-L/16 slot24; Codec: VQ-UFC; Task: semantic segmentation"
+args:
+  real: true
+  quality: S01_N20
+  multi_run: true
+  output_dir: ${PROJECT_ROOT}/logs/vq_ufc/dinov3/ade20k_val
+dataset:
+  type: SegmentationDataset
+  root: ${PROJECT_ROOT}/data/ADEChallengeData2016
+  img_path: images/validation
+  seg_map_path: annotations/validation
+  file_list: null
+  reduce_zero_label: true
+test_transforms:
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img, semseg]
+  - type: cofai.transforms.AddIgnoreRegions
+  - type: cofai.transforms.ToTensor
+    keys: [img, semseg]
+collate:
+  mode: stack_only
+task_configs:
+  - label: semseg
+    meter:
+      type: MeanIoUMetric
+      num_classes: 150
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: 24
+    n_last_blocks: 1
+    cast_dtype: float16
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+  dino_codec:
+    type: cofai.latent_codecs.VQUFCFeatureCodec
+    checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S01_N20.pth.tar
+  heads:
+    semseg:
+      type: Dinov3SegmentationHead
+      in_channels: [1024]
+      in_index: [0]
+      input_transform: resize_concat
+      channels: 1024
+      num_classes: 150
+      patch_size: 16
+      checkpoint: ${PROJECT_ROOT}/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+
+# Each point selects its own checkpoint; cofai-eval runs these sequentially.
+multi_run:
+  T01_N20:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T01_N20.pth.tar
+  T02_N48:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T02_N48.pth.tar
+  T03_N72:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T03_N72.pth.tar
+  T04_N96:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T04_N96.pth.tar
+  T05_N120:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T05_N120.pth.tar
+  T06_N144:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T06_N144.pth.tar
+  T07_N192:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T07_N192.pth.tar
+  T08_N240:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/T08_N240.pth.tar
+  S01_N20:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S01_N20.pth.tar
+  S02_N48:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S02_N48.pth.tar
+  S03_N72:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S03_N72.pth.tar
+  S04_N96:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S04_N96.pth.tar
+  S05_N120:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S05_N120.pth.tar
+  S06_N144:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S06_N144.pth.tar
+  S07_N192:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S07_N192.pth.tar
+  S08_N240:
+    model:
+      dino_codec:
+        checkpoint_path: ${PROJECT_ROOT}/weights/vq_ufc/dinov3/rd_points/S08_N240.pth.tar

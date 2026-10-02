@@ -189,3 +189,6 @@ pyrightconfig.json
 # macOS
 .DS_Store
 **/.DS_Store
+# VQ-UFC generated RMS artifacts and checkpoints stay outside source control.
+examples/vq_ufc/**/*.npz
+examples/vq_ufc/**/*.pth.tar
