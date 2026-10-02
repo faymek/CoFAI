@@ -49,7 +49,7 @@ CoFAI 将视觉场景的可编码信息归纳为三类表征。它们可以单�
 和解码端如何获得它；图中的上下文集合不意味着任意分支都自动拥有其它分支的数据。
 
 “层”表示一种完整表征，不等同于神经网络中的 Transformer layer。为了避免混淆，
-神经网络切分位置统一使用 [slot](reference_software.md#6-slot-与模型切分点) 描述。
+神经网络切分位置统一使用 [slot](reference_software.md#6-slots-and-model-split-points) 描述。
 
 ## 3. 上下文关系
 

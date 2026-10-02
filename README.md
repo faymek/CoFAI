@@ -175,7 +175,6 @@ CoFAI/
 - [Hosted API documentation](https://faymek.github.io/CoFAI)
 - [Migration guide from `mpcompress` to `cofai`](MIGRATION.md)
 - [Development and contribution workflow](README_DEV.md)
-- Editable diagrams: [overall framework](docs/assets/cofai-framework.pptx) and [feature coding and deployment](docs/assets/cofai-feature-deployment.pptx)
 
 New method implementations normally begin under `examples/`. Reusable components move into `cofai/` once their interfaces and evaluation behavior are stable.
 

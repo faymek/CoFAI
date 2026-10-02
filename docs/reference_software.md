@@ -1,104 +1,84 @@
-# CoFAI 参考软件实现
+# CoFAI Reference Software Implementation
 
-本文说明当前参考软件如何实现 [CoFAI 框架概念](framework.md)。它描述代码事实、
-公共接口和成熟度边界，不替代具体方法的复现文档，也不把探索性实现承诺为稳定 API。
+This guide explains how the reference software implements the [CoFAI framework](framework.md). It describes component responsibilities, public interfaces, and implementation limits. Method-specific guides remain the source for reproduction instructions; experimental interfaces are not presented as stable APIs.
 
-评测 plan、dataset、transform、meter 和结果文件的详细契约见
-[Engine 架构与数据流](engine.md)。
+See the [evaluation engine guide](engine.md) for the contracts governing plans, datasets, transforms, task meters, and result files.
 
-## 1. 实现分层
+## 1. Implementation Layers
 
-当前代码分为四层：
+An evaluation plan selects the experimental conditions and components. The engine builds and runs them; model classes connect backbones, codecs, and task heads; reusable components implement their individual operations.
 
 ```mermaid
 flowchart TB
-  P[plan YAML<br/>实验条件与组件配置]
-  E[cofai.engine<br/>构建、评测、码率、结果]
-  M[cofai.models<br/>backbone-codec-head 编排]
-  C[公共组件<br/>backbone / latent codec / index codec / head]
-  X[examples<br/>方法适配、训练与专用评测]
-
+  P[plan YAML<br/>conditions and component configuration]
+  E[cofai.engine<br/>building, evaluation, bitrate, results]
+  M[cofai.models<br/>backbone-codec-head orchestration]
+  C[reusable components<br/>backbone / latent codec / index codec / head]
+  X[examples<br/>method adaptation, training, dedicated evaluation]
   P --> E --> M --> C
   X --> M
   X --> C
 ```
 
-- `cofai/` 保存跨方法复用的组件和统一评测能力；
-- `conf/plan/` 保存可以直接运行的公共评测计划；
-- `examples/` 保存方法专用数据适配、训练、离线实验和仍在收敛的实现；
-- 新能力通常先在 `examples/` 跑通，再在参考软件更新窗口中沉淀到 `cofai/`。
+- `cofai/` contains reusable components and shared evaluation support.
+- `conf/plan/` contains runnable evaluation plans.
+- `examples/` contains method-specific adaptation, training, offline experiments, and implementations that have not yet been integrated into shared components.
 
-## 2. 公共组件命名空间
+## 2. Component Namespaces
 
-| 命名空间 | 责任 | 当前示例 |
+| Namespace | Responsibility | Examples |
 |---|---|---|
-| `cofai.backbone` | 模型前缀/后缀和切分点特征 | DINOv2、DINOv3、Qwen3-VL、GPS/TransReID |
-| `cofai.latent_codecs` | 连续特征或 token value 编解码 | MPC、VTC、VQFC、ORFC、VTM、raw dtype、bypass |
-| `cofai.index_codecs` | 离散索引和选择关系编解码 | uniform index、adaptive bitmap index |
-| `cofai.token_grouping` | token 选择、分组及结构结果 | GPS token grouping |
-| `cofai.heads` | 下游任务预测或重建 | 分类、语义分割、深度、RAE、ReID |
-| `cofai.datasets` | 图像、特征、视频和任务数据 | classification、segmentation、NYUv2、MMStar |
-| `cofai.metrics` | 任务指标和逐样本聚合 | accuracy、mIoU、depth、VQA、图像质量 |
-| `cofai.engine` | plan 执行和公共评测协议 | registry、EvalBatch、bitrate、profiling |
+| `cofai.backbone` | Model prefixes, suffixes, and split-point features | DINOv2, DINOv3, Qwen3-VL, GPS/TransReID |
+| `cofai.latent_codecs` | Coding feature values or token values | MPC, VTC, VQFC, ORFC, VTM, raw dtype, bypass |
+| `cofai.index_codecs` | Coding discrete indices and selection maps | Uniform index, adaptive bitmap index |
+| `cofai.token_grouping` | Token selection, grouping, and structural results | GPS token grouping |
+| `cofai.heads` | Task prediction or reconstruction | Classification, segmentation, depth, RAE, ReID |
+| `cofai.datasets` | Images, features, video, and task data | Classification, segmentation, NYUv2, MMStar |
+| `cofai.metrics` | Task metrics and per-sample aggregation | Accuracy, mIoU, depth, VQA, image quality |
+| `cofai.engine` | Plan execution and shared evaluation contracts | Registry, EvalBatch, bitrate, profiling |
 
-`token_codecs` 已不再作为公共命名空间：特征值编码属于 `latent_codecs`，离散索引
-编码属于 `index_codecs`。这一划分对应数据语义，而不是某个特定方法。
+`token_codecs` is no longer a public namespace. Feature-value coding belongs to `latent_codecs`; discrete-index coding belongs to `index_codecs`. This distinction follows the data semantics rather than a particular coding method.
 
-## 3. 模型编排层
+## 3. Model Orchestration
 
-`cofai.models` 负责把公共组件组合成一次完整的编码与任务推理。当前主要模型为：
+`cofai.models` combines components into complete coding and task-inference pipelines.
 
-| 模型 | 用途 | 状态 |
+| Model | Purpose | Implementation status |
 |---|---|---|
-| `DinoFeatureCodecModel` | DINOv2/DINOv3 单窗口特征编码与多任务解码 | 公共主路径 |
-| `DinoSlideFeatureCodecModel` | 大图滑窗特征编码与语义分割融合 | 公共专用路径 |
-| `Qwen3vlFeatureCodecModel` | Qwen3-VL 视觉切分点编码与 VQA 生成 | CTC 专用路径 |
-| `CommonFeatureCodecModel` | 可带 token grouping 和 index side stream 的通用探索模型 | 探索性接口 |
-| MPC 系列模型 | 多层特征/图像上下文联合编码 | 方法兼容路径 |
-| MLoRE frame/video 模型 | RFC 多任务和视频容器 | 方法专用路径 |
+| `DinoFeatureCodecModel` | Single-window DINOv2/DINOv3 feature coding and multi-task decoding | Main shared evaluation path |
+| `DinoSlideFeatureCodecModel` | Sliding-window feature coding and segmentation fusion | Specialized shared path |
+| `Qwen3vlFeatureCodecModel` | Qwen3-VL vision-feature coding and VQA generation | CTC evaluation path |
+| `CommonFeatureCodecModel` | General feature coding with optional token grouping and index side streams | Experimental interface |
+| MPC models | Joint coding of multi-layer features and image context | Method-specific compatibility paths |
+| MLoRE frame/video models | RFC multi-task models and video containers | Method-specific paths |
 
-“公共主路径”表示已有统一 plan 和组件边界；“探索性接口”表示代码可运行且有测试，
-但接口仍可能随相关方法改变；“方法专用路径”表示尚未完全收敛到统一模型。
+Shared evaluation paths have common plans and component boundaries. Experimental interfaces may change as methods evolve. Method-specific paths have not yet fully converged on the shared model interfaces.
 
-## 4. DINO 特征编码主路径
+## 4. DINO Feature Coding
 
-`DinoFeatureCodecModel` 把模型分为 backbone、latent codec 和 task heads：
-
-**简化数据流**
+`DinoFeatureCodecModel` connects a backbone, a latent codec, and task heads.
 
 ```mermaid
 flowchart LR
-  I[image]
-  BP[backbone prefix]
-  H[split tokens h]
-  LC[latent codec]
-  HH[reconstructed tokens h_hat]
-  BS[backbone suffix]
-  HD[task heads]
-  MT[task metrics]
-
-  I --> BP --> H --> LC --> HH --> BS --> HD --> MT
+  I[image] --> BP[backbone prefix] --> H[split tokens h]
+  H --> LC[latent codec] --> HH[reconstructed tokens h_hat]
+  HH --> BS[backbone suffix] --> HD[task heads] --> MT[task metrics]
 ```
 
-**当前实现组件图**
+![DinoFeatureCodecModel components and shared evaluation flow](assets/dino-feature-codec-model.png)
 
-![DinoFeatureCodecModel 的组件与统一评测流程](assets/dino-feature-codec-model.png)
+Evaluation supports two bitrate paths:
 
-在线评测有两条码率路径：
+1. `forward_test` calls the codec's forward interface and reads `likelihoods` or `bits`.
+2. `compress`/`decompress` produce and consume actual `strings` for coded-size and encoding/decoding-time measurements.
 
-1. `forward_test` 调用 codec 的前向接口，读取 `likelihoods` 或 `bits`；
-2. `compress`/`decompress` 生成并消费真实 `strings`，用于实际码率和编解码时间。
+The model stores `token_res` in `pstate` so the decoder can recover the spatial meaning of the token sequence. Depending on the configured heads, reconstructed features support classification, segmentation, depth estimation, and image reconstruction.
 
-模型在 `pstate` 中保存 `token_res`，使 decoder 能把 token 序列恢复到正确的空间语义。
-根据 plan 配置的 heads，同一重建特征可以服务分类、语义分割、深度和图像重建任务。
+`DinoSlideFeatureCodecModel` adds sliding-window crops, per-crop coding, and full-image logit fusion. It uses a `type: slide_crops` coded-data container; bitrate accounting sums the streams from all crops.
 
-`DinoSlideFeatureCodecModel` 在上述流程外增加滑窗 crop、逐 crop 编码和全图 logits
-融合。其输出使用 `type: slide_crops` 的 coded-data 容器，码率由所有 crop 的流累加。
+## 5. Qwen3-VL Feature Coding
 
-## 5. Qwen3-VL 路径
-
-`Qwen3vlFeatureCodecModel` 沿用“backbone + codec”的切分思路，但 VQA 不使用独立的
-通用 task head：解码后的视觉 token 重新注入视觉编码器后缀，并由语言模型生成答案。
+`Qwen3vlFeatureCodecModel` also splits a backbone around a codec, but VQA does not use a separate generic task head. Decoded visual tokens re-enter the vision-encoder suffix, and the language model generates the answer.
 
 ```text
 image + prompt
@@ -110,103 +90,79 @@ image + prompt
   -> VQA metric
 ```
 
-prompt 属于任务输入，只在解码/生成阶段使用，不进入 feature codec 的 `compress`。
-当前公共 CTC plan 使用 MMStar 和 slot 9。
+The prompt is a task input used during decoding and generation; it is not passed to the feature codec's `compress` method. The current shared CTC plan uses MMStar and slot 9.
 
-## 6. Slot 与模型切分点
+## 6. Slots and Model Split Points
 
-Transformer block 从 `Layer 0` 开始计数。CoFAI 对切分点采用以下约定：
+Transformer blocks are numbered from `Layer 0`. CoFAI names their tensor boundaries as follows:
 
-- `Layer n` 的输入称为 `Slot n`；
-- `Layer n` 的输出称为 `Slot n+1`。
+- The input to `Layer n` is `Slot n`.
+- The output of `Layer n` is `Slot n+1`.
 
-因此，DINOv3 的 `Layer 23` 输出写作 `Slot 24`。这种命名明确区分“执行了多少个
-block”和“切分发生在哪个张量边界”，也避免与 CoFAI 表征 Layer 混淆。
-
-**简化约定**
+The output of DINOv3 `Layer 23` is therefore `Slot 24`. This separates the number of executed blocks from the tensor boundary and avoids confusing Transformer layers with CoFAI representation layers.
 
 ```mermaid
 flowchart LR
   S0((Slot n)) --> L[Layer n] --> S1((Slot n+1))
 ```
 
-**DINO 切分示意**
+![Transformer layers and slot boundaries](assets/slot-convention.png)
 
-![Transformer layer 与 slot 切分位置约定](assets/slot-convention.png)
+Current shared CTC plans include:
 
-当前 CTC 中已经落入公共 plan 的切分点包括：
-
-| 模型 | Slot | 任务 |
+| Model | Slot | Tasks |
 |---|---|---|
-| DINOv3 ViT-L/16 | 24 | ADE20K semantic segmentation、NYUv2 depth |
+| DINOv3 ViT-L/16 | 24 | ADE20K segmentation, NYUv2 depth |
 | Qwen3-VL 8B Instruct | 9 | MMStar VQA |
 
-plan 名称、配置字段和报告中都应使用 slot 表述。引用旧文档的 Layer 编号时，应同时
-给出对应 slot，避免发生一位偏移。
+Use slot names in plan names, configuration fields, and reports. When citing layer numbers from earlier documents, also give the corresponding slot to avoid an off-by-one ambiguity.
 
-## 7. Token Grouping 与多流 DU
+## 7. Token Grouping and Multi-Stream Data Units
 
-Token Grouping 会同时产生紧凑特征和描述选择关系的离散索引。
+Token grouping produces compact features and discrete indices describing selection or grouping relationships.
 
-**完整概念结构（原图）**
+![Conceptual CommonFeatureCodecModel boundaries](assets/common-feature-codec-model.png)
 
-![CommonFeatureCodecModel 完整概念结构](assets/common-feature-codec-model.png)
+This conceptual diagram includes token preprocessing, separate feature and mask/index coding, and token restoration before the task module. It does not imply that every operation is implemented as a separate component. Token preprocessing currently belongs to the relevant backbone's `encode` method. `post_process` is a reserved extension point: it must currently be `None`, with no executable implementation or stable invocation contract.
 
-原图表达的是完整功能边界：特征接口之后对 token 做结构化预处理，特征和
-mask/index 分别编码，解码后再恢复任务模块所需的 token 形态。它不等同于
-当前参考软件已经落地的类边界：“Token 预处理”目前由具体 backbone 的
-`encode` 承担；“Token 后处理”已作为 `post_process` 扩展点预留，但当前
-参数必须为 `None`，尚无可执行实现和稳定调用契约。
+The experimental `CommonFeatureCodecModel` currently follows these rules:
 
-**当前参考软件数据流（简化图）**
-
-当前探索性 `CommonFeatureCodecModel` 规定：
-
-1. 普通 backbone 的 `encode` 可以只返回 tensor；
-2. 需要结构侧信息的 backbone 返回 `h`、`pstate` 和原始 `index_sets`；
-3. backbone 不写 byte stream；
-4. latent codec 编码 `h`，配置的 index codec 编码每个 `index_sets`；
-5. 模型把所有流平铺到同一个 CodedUnit 的 `strings` 中。
+1. A simple backbone's `encode` may return a tensor alone.
+2. A backbone requiring structural side information returns `h`, `pstate`, and raw `index_sets`.
+3. The backbone does not write byte streams.
+4. The latent codec codes `h`; configured index codecs code the corresponding `index_sets`.
+5. The model places all streams in the same CodedUnit's flat `strings` mapping.
 
 ```mermaid
 flowchart TB
   subgraph ENC["Encode"]
-    direction LR
     X["input"] --> BE["backbone.encode"]
-    BE --> H["h<br/>compact features"]
-    BE --> PS["pstate<br/>backbone state"]
-    BE --> IS["index_sets<br/>raw discrete indices"]
+    BE --> H["h: compact features"]
+    BE --> PS["pstate: backbone state"]
+    BE --> IS["index_sets: raw indices"]
     H --> LC["latent codec.compress"]
-    IS --> IC["index codecs<br/>encode_batch"]
+    IS --> IC["index codecs.encode_batch"]
   end
-
-  LC --> CS["codec streams<br/>+ codec pstate"]
-  IC --> SS["index side streams"]
-  CS --> CU["CodedUnit<br/>flat strings + merged pstate"]
-  SS --> CU
+  LC --> CU["CodedUnit: flat strings + merged pstate"]
+  IC --> CU
   PS --> CU
-
   subgraph DEC["Decode"]
-    direction LR
-    CU --> SPLIT["split codec streams/state<br/>from backbone state"]
+    CU --> SPLIT["split codec streams/state from backbone state"]
     SPLIT --> LD["latent codec.decompress"]
     SPLIT --> IV["index codecs.decode_batch"]
-    LD --> HH["h_hat<br/>compact features"]
+    LD --> HH["h_hat: compact features"]
     SPLIT -->|"backbone pstate"| BD["backbone.decode"]
-    IV --> VALID["validation only<br/>result not consumed"]
+    IV --> VALID["validation only; indices not consumed"]
     HH -->|"current path"| BD
-    BD --> HEADS["optional task heads"]
-    HEADS --> OUT["task outputs"]
+    BD --> HEADS["optional task heads"] --> OUT["task outputs"]
   end
-
-  PP["Token post_process<br/>reserved interface; currently None"]
+  PP["Token post_process: reserved; currently None"]
   HH -. "reserved feature input" .-> PP
   IV -. "reserved index input" .-> PP
   PP -. "future restored tokens" .-> BD
 ```
 
-图中的 index side streams 在当前解码路径上只做可解码性校验，解出的
-indices 尚不参与 `h_hat` 或稠密 token 网格的恢复。
+Decoded index side streams currently undergo decodability validation only. Their indices do not yet restore `h_hat` or a dense token grid.
 
 ```python
 encoded = {
@@ -224,38 +180,27 @@ coded_unit = {
 }
 ```
 
-这里 `selection_map` 和 `feature` 是同一个 DU 内语义不同的两个流，不需要额外嵌套
-一层“codec”。统一码率模块按流分别统计，再计算总码率。
+`selection_map` and `feature` are distinct streams within one DU, without an additional nested codec container. Shared bitrate accounting reports each stream and their total.
 
-当前 GPS ReID decoder 直接消费 compact token sequence，并不恢复完整二维 token
-网格；`post_process` 是已保留但未实现的架构接口。因此，文档和新方法
-应继续保留“稠密恢复”的位置，同时将它标记为未实现的扩展点。
+The GPS ReID decoder consumes compact token sequences directly rather than restoring a complete two-dimensional grid. Dense token restoration remains part of the architecture through the reserved, unimplemented `post_process` interface.
 
-## 8. CodedUnit 与码率实现
+## 8. CodedUnit and Bitrate Accounting
 
-`cofai.engine.bitrate` 接受三种单 DU 码率来源：
+`cofai.engine.bitrate` accepts three bitrate sources for a single DU:
 
-| 字段 | 含义 | 用途 |
+| Field | Meaning | Use |
 |---|---|---|
-| `strings` | 实际 byte stream | 真实编码、可逐流审计 |
-| `likelihoods` | 概率模型输出 | 估计码率 |
-| `bits` | 组件显式提供的 bit 数 | 无 likelihood 的分析路径 |
+| `strings` | Actual byte streams | Real coding and per-stream accounting |
+| `likelihoods` | Probability-model outputs | Estimated bitrate |
+| `bits` | Explicit component-provided bit counts | Analytical paths without likelihoods |
 
-实际 `strings` 的 bit 数按所有 bytes 长度计算。`bits_from_coded_data` 还支持：
+Actual stream size is computed from the total byte lengths. `bits_from_coded_data` supports `unit`, `frame`, `frame_wise_video`, `layer_wise_video`, and `slide_crops` containers.
 
-- `unit`；
-- `frame`；
-- `frame_wise_video`；
-- `layer_wise_video`；
-- `slide_crops`。
+These containers support shared evaluation and bitrate aggregation. Not all `pstate` information is serialized into standardized high-level syntax. The current CodedUnit is a research-stage intermediate representation, not a finalized interoperable bitstream format.
 
-这些容器首先服务于统一评测和码率展开。`pstate` 尚未全部序列化为标准高层语法，
-因此当前参考软件中的 CodedUnit 是研究阶段中间表示，不应直接宣称为最终互操作码流。
+## 9. Evaluation Engine and Plans
 
-## 9. Engine 与 plan
-
-一份 plan 固定 dataset、transforms、model、weights、tasks、metrics、质量点和输出位置。
-Engine 依次完成：
+A plan specifies the dataset, transforms, model, weights, tasks, metrics, quality settings, and output location. The engine executes the following sequence:
 
 ```text
 Hydra compose
@@ -266,32 +211,29 @@ Hydra compose
   -> result.json + config.yaml
 ```
 
-`args.profile=true` 会额外统计 latent codec 参数量、编码/解码 FLOPs 和运行时间；
-`args.multi_run=true` 会扫描 plan 声明的质量点并生成 `summary.json`。
+`args.profile=true` additionally measures latent-codec parameter count, encoding/decoding FLOPs, and runtime. `args.multi_run=true` evaluates the plan's quality settings and writes `summary.json`.
 
-任务数据采用 `kind` 与 `label` 分离的契约：`kind` 对应 dataset 中的 GT 语义，
-`label` 对应模型输出名。这允许同一种任务同时比较多个输出方案。
+Task contracts separate `kind` from `label`: `kind` identifies the dataset's ground-truth semantics, while `label` identifies a model output. This allows multiple output variants for the same task to be compared.
 
-## 10. 框架层级与当前覆盖
+## 10. Framework Coverage
 
-| 框架层级 | 当前实现 | 成熟度 |
+| Framework level | Current implementations | Status |
 |---|---|---|
-| 单层单帧 | DINO CTC、LaMoFC、VQFC、VTC、ORFC、GPS 等 | 主要工作路径 |
-| 多层单帧 | MPC 多分支和视觉/特征联合方案 | 已有实现，接口仍在统一 |
-| 多层多帧 | CAVC、MLoRE video 等方法路径 | 探索和方法专用阶段 |
+| Single-layer, single-frame | DINO CTC, LaMoFC, VQFC, VTC, ORFC, GPS | Main evaluation paths |
+| Multi-layer, single-frame | MPC branches and joint visual/feature coding | Implemented; interfaces still being unified |
+| Multi-layer, multi-frame | CAVC, MLoRE video paths | Experimental and method-specific |
 
-新增方案应明确自己属于哪个层级，不应为了适配统一 Engine 而掩盖真实的层间或帧间
-依赖。公共抽象以明确的跨方法复用需求为依据，避免为单一方案提前固化接口。
+New methods should identify their framework level and preserve their actual cross-layer or temporal dependencies. Shared abstractions should reflect concrete reuse needs rather than prematurely fixing interfaces for a single method.
 
-## 11. 实现沉淀约定
+## 11. Integrating Reusable Components
 
-一种新方法从参考实现进入公共能力，通常经过：
+Integration typically involves:
 
-1. 在 `examples/<method>/` 保存原始可运行流程和复现结果；
-2. 使用相同权重、数据、预处理和指标建立集成前基线；
-3. 将可复用的 backbone、codec、head、metric 等沉淀到 `cofai/`；
-4. 用 plan 表达正式评测条件；
-5. 比较重构前后结果，确认接口统一没有改变评测口径；
-6. 在方法文档中记录资源、命令、结果路径和仍未覆盖的限制。
+1. Keeping the original runnable implementation and reproduction results in `examples/<method>/`.
+2. Establishing a baseline with the same weights, data, preprocessing, and metrics.
+3. Moving reusable backbones, codecs, heads, and metrics into `cofai/`.
+4. Expressing evaluation conditions in a plan.
+5. Comparing results before and after refactoring to verify equivalent evaluation behavior.
+6. Documenting resources, commands, result paths, and remaining limits in the method guide.
 
-本文只维护当前代码映射、实现边界和稳定接口；发生变化时应与代码和 Engine 文档同步。
+Keep this implementation guide synchronized with code and engine documentation as interfaces change.
