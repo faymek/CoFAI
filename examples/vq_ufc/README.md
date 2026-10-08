@@ -9,6 +9,7 @@ cofai/entropy_models/vq_ufc_model.py       # Quantization and token transforms
 cofai/latent_codecs/vq_ufc.py              # CoFAI codec adapter
 cofai/utils/utils_vqufc.py                 # Feature splits and RMS helpers
 examples/vq_ufc/dinov3/plan/*VQUFC*.yaml   # Evaluation plans
+examples/vq_ufc/dinov3/data_lists/*.txt     # Training image selections
 examples/vq_ufc/dinov3/all_token_rms.py    # RMS command-line entry point
 examples/vq_ufc/dinov3/train_vq_ufc_dinov3.py
 examples/vq_ufc/train_stage{1,2}.sh
@@ -49,4 +50,18 @@ Each plan evaluates all 16 checkpoints sequentially for its task. Results are wr
 
 ## Offline Training
 
-Training uses pre-extracted DINOv3 `.npy` features. `train_vq_ufc_dinov3.py` is the configurable training program; both shell scripts call it with preset arguments. First run `all_token_rms.py` to produce an RMS artifact bound to the training split. `train_stage1.sh` trains the shared codebook and entropy prior without a token transform (NYU defaults). `train_stage2.sh <nyu|ade> <latent-tokens>` loads the Stage 1 checkpoint, freezes the codebook and prior, and trains the token transform. Its `BASE_CHECKPOINT` defaults to the NYU Stage 1 result even for ADE; override it when needed. RMS artifacts and checkpoints are generated files and are not committed.
+The training image selections are in `dinov3/data_lists/`: `ade_1w.txt` lists ADE image filenames, while `nyu_train_1w.txt` lists the NYU RGB path, depth path, and scale on each line. These lists select source images; the VQ-UFC trainer does **not** read them directly. It scans pre-extracted DINOv3 `.npy` features instead.
+
+For feature extraction, refer to ORFC's `examples/orfc_2446/dinov3/offline/extract_features_dinov3.py`: it uses DINOv3 ViT-L/16 slot24, retains the CLS/REG and patch tokens, and saves one `[tokens, 1024]` `.npy` array per image. Its ADE mode accepts the list directly:
+
+```bash
+export PROJECT_ROOT="$PWD"
+python examples/orfc_2446/dinov3/offline/extract_features_dinov3.py \
+  --dataset ade --slot 24 \
+  --pathname_list examples/vq_ufc/dinov3/data_lists/ade_1w.txt \
+  --output_dir "$PROJECT_ROOT/features/vq_ufc/dinov3/ade_1w"
+```
+
+The ORFC extractor has no NYU mode. For NYU, use the RGB path in the first column of `nyu_train_1w.txt` and follow the same backbone/slot24 and per-image `.npy` output pattern, with preprocessing appropriate for NYU. Put the resulting features under `$PROJECT_ROOT/features/vq_ufc/dinov3/nyu_1w`. The training scripts still default to the existing ORFC feature directories; set `FEATURE_DIR` to the corresponding VQ-UFC directory when using these outputs.
+
+`train_vq_ufc_dinov3.py` is the configurable training program; both shell scripts call it with preset arguments. First run `all_token_rms.py` to produce an RMS artifact bound to the training split. `train_stage1.sh` trains the shared codebook and entropy prior without a token transform (NYU defaults). `train_stage2.sh <nyu|ade> <latent-tokens>` loads the Stage 1 checkpoint, freezes the codebook and prior, and trains the token transform. Its `BASE_CHECKPOINT` defaults to the NYU Stage 1 result even for ADE; override it when needed. RMS artifacts and checkpoints are generated files and are not committed.
