@@ -83,27 +83,13 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
 CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/nyuv2-val__dinov3-vitl16-slot6__Bypass__depth.yaml
 
-# ADE20K 语义分割（ORFC SoftPQ，Layer 5 / slot6 / blk05）
-CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
-  examples/orfc_2446/plan/dinov3/ade20k-val__dinov3-vitl16-slot6__ORFC__semseg.yaml \
-  args.multi_run=true args.cuda=true args.real=true
-
-# NYUv2 深度估计（ORFC SoftPQ，Layer 5 / slot6 / blk05）
-CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
-  examples/orfc_2446/plan/dinov3/nyuv2-val__dinov3-vitl16-slot6__ORFC__depth.yaml \
-  args.multi_run=true args.cuda=true args.real=true
-
 # COCO val 1k 检测（Bypass，Layer 5 / slot6，short-side 1024，Plain-DETR）
 CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
   conf/plan/coco-val1k__dinov3-vitl16-slot6__Bypass__det.yaml
 
-# COCO val 1k 检测（ORFC SoftPQ，Layer 5 / slot6）
-CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
-  examples/orfc_2446/plan/dinov3/coco-val1k__dinov3-vitl16-slot6__ORFC__det.yaml \
-  args.multi_run=true args.cuda=true args.real=true
 ```
 
-slot6 ORFC 码本：`poetry run cofai-download examples/orfc_2446/dinov3/dinov3-orfc_2446.manifest.txt` 后解压 `weights/orfc_2446/dinov3_vitl16_slot6.zip` 到同名目录；4 档 `blk05_K{4,8,16,256}_e32.npz`，不要混用 `blk23_*`。检测 head 结构在仓库 `vendor/dinov3`；评测需 `pycocotools`（已写入 `pyproject.toml`）。
+检测 head 结构在仓库 `vendor/dinov3`；评测需 `pycocotools`（已写入 `pyproject.toml`）。
 
 需要统计 **latent codec 复杂度**（参数量、编码/解码 FLOPs、codec 耗时）时，加上 `args.profile=true`；结果会写入 `result.json` 末尾的 `codec_*` 字段（`codec_params`、`codec_enc_flops`、`codec_dec_flops`、`codec_enc_time`、`codec_dec_time`）。`args.max_samples` 同样生效，不设则跑完整数据集后取平均。
 
@@ -123,14 +109,6 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
 | `nyuv2-val__dinov3-vitl16-slot6__Bypass__depth` | 0.0 | RMSE 0.3474（与 slot24 一致） |
 | `coco-val1k__dinov3-vitl16-slot6__Bypass__det` | 0.0 | AP 0.5568 / AP50 0.7612 |
 
-slot6 ORFC（`blk05_*` SoftPQ，4 档 `real` rANS；summary 在 `logs/<plan>/summary.json`）：
-
-| q | 码本 | ADE bpp / mIoU | NYUv2 bpp / RMSE | COCO 1k bpp / bpfp / AP / AP50 |
-|---|------|----------------|------------------|--------------------------------|
-| 1 | K4e32 | 0.252 / 0.4918 | 0.234 / 0.3973 | 1.266 / 0.0553 / 0.4489 / 0.6544 |
-| 2 | K8e32 | 0.377 / 0.5110 | 0.360 / 0.3904 | 1.984 / 0.0867 / 0.4932 / 0.6982 |
-| 3 | K16e32 | 0.504 / 0.5140 | 0.482 / 0.3797 | 2.711 / 0.1183 / 0.5060 / 0.7155 |
-| 4 | K256e32 | 1.024 / 0.5275 | 0.993 / 0.3626 | 5.633 / 0.2459 / 0.5359 / 0.7437 |
 
 
 ## 4. 统一架构总览
@@ -245,10 +223,7 @@ ade20k-val__dinov3-vitl16-slot24__Bypass__semseg.yaml
 nyuv2-val__dinov3-vitl16-slot24__Bypass__depth.yaml
 ade20k-val__dinov3-vitl16-slot6__Bypass__semseg.yaml
 nyuv2-val__dinov3-vitl16-slot6__Bypass__depth.yaml
-ade20k-val__dinov3-vitl16-slot6__ORFC__semseg.yaml
-nyuv2-val__dinov3-vitl16-slot6__ORFC__depth.yaml
 coco-val1k__dinov3-vitl16-slot6__Bypass__det.yaml
-coco-val1k__dinov3-vitl16-slot6__ORFC__det.yaml
 ```
 
 plan 内部结构（节选）：
