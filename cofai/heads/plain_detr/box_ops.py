@@ -63,29 +63,3 @@ def delta2bbox(
         bboxes[..., 0::2].clamp_(min=0).clamp_(max=max_shape[1])
         bboxes[..., 1::2].clamp_(min=0).clamp_(max=max_shape[0])
     return bboxes
-
-
-def bbox2delta(proposals, gt, means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0)):
-    # hack for matcher
-    if proposals.size() != gt.size():
-        proposals = proposals[:, None]
-        gt = gt[None]
-
-    proposals = proposals.float()
-    gt = gt.float()
-    px, py, pw, ph = proposals.unbind(-1)
-    gx, gy, gw, gh = gt.unbind(-1)
-
-    dx = (gx - px) / (pw + 0.1)
-    dy = (gy - py) / (ph + 0.1)
-    dw = torch.log(gw / (pw + 0.1))
-    dh = torch.log(gh / (ph + 0.1))
-    deltas = torch.stack([dx, dy, dw, dh], dim=-1)
-
-    # avoid unnecessary sync point if not needed
-    if means != (0.0, 0.0, 0.0, 0.0) or stds != (1.0, 1.0, 1.0, 1.0):
-        means = deltas.new_tensor(means).unsqueeze(0)
-        stds = deltas.new_tensor(stds).unsqueeze(0)
-        deltas = deltas.sub_(means).div_(stds)
-
-    return deltas

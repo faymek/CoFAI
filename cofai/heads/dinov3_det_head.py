@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 from typing import Any, Optional, Sequence
 
 import torch
 import torch.nn as nn
 
-
-class _StubDinoViT(nn.Module):
-    """Placeholder so ``build_model`` can size DETR without the official ViT."""
-
-    n_blocks = 24
-    embed_dim = 1024
-    patch_size = 16
+from .plain_detr.decoder import GlobalDecoder, GlobalDecoderLayer
+from .plain_detr.model import PlainDETR, PostProcess
+from .plain_detr.transformer import Transformer
+from .plain_detr.utils import NestedTensor, inverse_sigmoid
 
 
 class Dinov3PlainDETRHead(nn.Module):
@@ -25,70 +20,56 @@ class Dinov3PlainDETRHead(nn.Module):
     def __init__(
         self,
         checkpoint: str,
-        dinov3_src: Optional[str] = None,
         score_thr: float = 0.001,
         topk: int = 100,
     ):
         super().__init__()
         self.score_thr = float(score_thr)
-        src = (
-            Path(dinov3_src).expanduser()
-            if dinov3_src is not None
-            else Path(__file__).resolve().parents[2] / "vendor" / "dinov3"
-        )
-        if not (src / "dinov3" / "eval" / "detection").is_dir():
-            raise FileNotFoundError(f"DINOv3 detection source not found: {src}")
-        if str(src) not in sys.path:
-            sys.path.insert(0, str(src))
-
-        from dinov3.eval.detection.config import DetectionHeadConfig
-        from dinov3.eval.detection.models.detr import PostProcess, build_model
-        from dinov3.eval.detection.models.position_encoding import PositionEncoding
-        from dinov3.eval.detection.util.misc import NestedTensor, inverse_sigmoid
-
-        self._NestedTensor = NestedTensor
-        self._inverse_sigmoid = inverse_sigmoid
-
-        backbone_model = _StubDinoViT()
-        layers_to_use = [5, 11, 17, 23]
-        patch_size = backbone_model.patch_size
-        config = DetectionHeadConfig(
-            num_classes=91,
-            with_box_refine=True,
-            two_stage=True,
-            mixed_selection=True,
-            look_forward_twice=True,
-            k_one2many=6,
-            lambda_one2many=1.0,
-            num_queries_one2one=300,
-            num_queries_one2many=300,
-            reparam=False,
-            topk=int(topk),
-            position_embedding=PositionEncoding.SINE,
-            num_feature_levels=1,
-            dec_layers=6,
-            dim_feedforward=2048,
-            hidden_dim=768,
+        decoder_layer = GlobalDecoderLayer(
+            d_model=768,
+            d_ffn=2048,
             dropout=0.0,
-            nheads=8,
+            n_heads=8,
             norm_type="pre_norm",
-            aux_loss=True,
+            rpe_hidden_dim=512,
+            rpe_type="linear",
+            feature_stride=16,
+        )
+        decoder = GlobalDecoder(
+            decoder_layer,
+            num_layers=6,
+            return_intermediate=True,
+            look_forward_twice=True,
+            d_model=768,
+            norm_type="pre_norm",
+        )
+        transformer = Transformer(
+            decoder,
+            d_model=768,
+            nhead=8,
+            num_feature_levels=1,
+            two_stage=True,
+            two_stage_num_proposals=600,
+            mixed_selection=True,
+            norm_type="pre_norm",
             proposal_feature_levels=4,
+            proposal_in_stride=16,
+            proposal_tgt_strides=[8, 16, 32, 64],
             proposal_min_size=50,
-            decoder_type="global_rpe_decomp",
-            decoder_use_checkpoint=False,
-            decoder_rpe_hidden_dim=512,
-            decoder_rpe_type="linear",
             add_transformer_encoder=True,
             num_encoder_layers=6,
-            layers_to_use=layers_to_use,
-            blocks_to_train=None,
-            n_windows_sqrt=0,
-            proposal_in_stride=patch_size,
-            proposal_tgt_strides=[int(m * patch_size) for m in (0.5, 1, 2, 4)],
-            backbone_use_layernorm=False,
         )
-        model = build_model(backbone_model, config)
+        model = PlainDETR(
+            transformer,
+            in_channels=4 * 1024,
+            num_classes=91,
+            num_feature_levels=1,
+            with_box_refine=True,
+            two_stage=True,
+            num_queries_one2one=300,
+            num_queries_one2many=300,
+            mixed_selection=True,
+        )
         ckpt_path = os.path.expanduser(str(checkpoint))
         if not os.path.isfile(ckpt_path):
             raise FileNotFoundError(f"Plain-DETR checkpoint not found: {ckpt_path}")
@@ -102,7 +83,7 @@ class Dinov3PlainDETRHead(nn.Module):
         model.load_state_dict(filtered, strict=True)
         model.eval()
         self.model = model
-        self.postprocess = PostProcess(topk=int(topk), reparam=False)
+        self.postprocess = PostProcess(topk=int(topk))
 
     @torch.inference_mode()
     def predict(
@@ -119,9 +100,8 @@ class Dinov3PlainDETRHead(nn.Module):
         device = concat_feat.device
         _, _, feat_h, feat_w = concat_feat.shape
         mask = torch.zeros(concat_feat.size(0), feat_h, feat_w, dtype=torch.bool, device=device)
-        feat_nested = self._NestedTensor(concat_feat, mask)
-        position_embedding = self.model.backbone[1]
-        pos = [position_embedding[0](feat_nested).to(concat_feat.dtype)]
+        feat_nested = NestedTensor(concat_feat, mask)
+        pos = [self.model.position_embedding(feat_nested).to(concat_feat.dtype)]
         srcs = [self.model.input_proj[0](concat_feat)]
         masks = [mask]
 
@@ -155,7 +135,7 @@ class Dinov3PlainDETRHead(nn.Module):
             outputs_classes, outputs_coords = [], []
             for lvl in range(hs.shape[0]):
                 ref = init_ref if lvl == 0 else inter_refs[lvl - 1]
-                ref = self._inverse_sigmoid(ref)
+                ref = inverse_sigmoid(ref)
                 oc = det.class_embed[lvl](hs[lvl])
                 tmp = det.bbox_embed[lvl](hs[lvl])
                 if ref.shape[-1] == 4:

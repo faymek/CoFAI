@@ -1,8 +1,8 @@
 """Regression tests for fixed-subset detection metrics and image geometry."""
 
 import json
+import subprocess
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -11,7 +11,9 @@ import torch
 from torch import nn
 
 from cofai.datasets.coco import CocoDetectionDataset
+from cofai.heads import dinov3_det_head
 from cofai.heads.dinov3_det_head import Dinov3PlainDETRHead
+from cofai.heads.plain_detr.model import PostProcess
 from cofai.metrics.coco_detection import CocoDetectionMeter
 from cofai.transforms import PadToMultiple, ResizeShortSide, ToTensor
 
@@ -64,18 +66,10 @@ def test_metric_all_empty_and_missing_prediction_id(annotations):
     assert meter.compute()["AP"] == pytest.approx(0.5049504950495048)
 
 
-def vendor_modules():
-    source = Path(__file__).resolve().parents[1] / "vendor" / "dinov3"
-    if str(source) not in sys.path:
-        sys.path.insert(0, str(source))
-    from dinov3.eval.detection.models import detr
-    from dinov3.eval.detection.util import misc
-    return detr, misc
-
-
-def test_default_source_and_strict_checkpoint_loading(tmp_path, monkeypatch):
-    detr, _ = vendor_modules()
-    monkeypatch.setattr(detr, "build_model", lambda *args: nn.Linear(2, 2))
+def test_strict_checkpoint_loading(tmp_path, monkeypatch):
+    for name in ("GlobalDecoderLayer", "GlobalDecoder", "Transformer"):
+        monkeypatch.setattr(dinov3_det_head, name, lambda *args, **kwargs: nn.Identity())
+    monkeypatch.setattr(dinov3_det_head, "PlainDETR", lambda *args, **kwargs: nn.Linear(2, 2))
     state = nn.Linear(2, 2).state_dict()
     state["backbone.0.backbone.unused"] = torch.zeros(1)
     path = tmp_path / "checkpoint.pth"
@@ -91,8 +85,34 @@ def test_default_source_and_strict_checkpoint_loading(tmp_path, monkeypatch):
     torch.save({"model": state}, path)
     with pytest.raises(RuntimeError, match="Unexpected key"):
         Dinov3PlainDETRHead(str(path))
-    with pytest.raises(FileNotFoundError, match="detection source"):
-        Dinov3PlainDETRHead(str(path), dinov3_src=str(tmp_path / "missing"))
+
+
+def test_head_constructs_without_importing_official_dinov3():
+    script = """
+import importlib.abc
+import sys
+class NoDinoV3(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "dinov3" or fullname.startswith("dinov3."):
+            raise AssertionError("Official DINOv3 import: " + fullname)
+sys.meta_path.insert(0, NoDinoV3())
+from torch import nn
+import torch
+from unittest.mock import patch
+from cofai.heads import dinov3_det_head as head
+original_path = list(sys.path)
+state = nn.Linear(2, 2).state_dict()
+with patch.object(head, "GlobalDecoderLayer", return_value=nn.Identity()), \\
+     patch.object(head, "GlobalDecoder", return_value=nn.Identity()), \\
+     patch.object(head, "Transformer", return_value=nn.Identity()), \\
+     patch.object(head, "PlainDETR", return_value=nn.Linear(2, 2)), \\
+     patch.object(head.os.path, "isfile", return_value=True), \\
+     patch.object(torch, "load", return_value=state):
+    head.Dinov3PlainDETRHead("unused.pth")
+assert sys.path == original_path
+assert not any(name == "dinov3" or name.startswith("dinov3.") for name in sys.modules)
+"""
+    subprocess.run([sys.executable, "-c", script], check=True)
 
 
 class FixedTransformer(nn.Module):
@@ -107,13 +127,10 @@ class FixedTransformer(nn.Module):
 
 
 def prediction_head(reference):
-    detr, misc = vendor_modules()
     head = Dinov3PlainDETRHead.__new__(Dinov3PlainDETRHead)
     nn.Module.__init__(head)
     head.score_thr = 0.001
-    head._NestedTensor = misc.NestedTensor
-    head._inverse_sigmoid = misc.inverse_sigmoid
-    head.postprocess = detr.PostProcess(topk=1, reparam=False)
+    head.postprocess = PostProcess(topk=1)
     classifier = nn.Linear(4, 2)
     regressor = nn.Linear(4, 4)
     with torch.no_grad():
@@ -122,7 +139,7 @@ def prediction_head(reference):
         regressor.weight.zero_()
         regressor.bias.zero_()
     head.model = SimpleNamespace(
-        backbone=[None, [lambda nested: torch.zeros_like(nested.tensors)]],
+        position_embedding=lambda nested: torch.zeros_like(nested.tensors),
         input_proj=[nn.Identity()],
         transformer=FixedTransformer(reference),
         num_queries=2,

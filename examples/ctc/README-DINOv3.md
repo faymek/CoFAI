@@ -89,7 +89,7 @@ CUDA_VISIBLE_DEVICES=0 poetry run cofai-eval \
 
 ```
 
-检测 head 结构在仓库 `vendor/dinov3`；评测需 `pycocotools`（已写入 `pyproject.toml`）。
+检测 head 使用 CoFAI 内部的 `cofai/heads/plain_detr` 组件，不需要 DINOv3 官方源码；评测需 `pycocotools`（已写入 `pyproject.toml`）。
 
 需要统计 **latent codec 复杂度**（参数量、编码/解码 FLOPs、codec 耗时）时，加上 `args.profile=true`；结果会写入 `result.json` 末尾的 `codec_*` 字段（`codec_params`、`codec_enc_flops`、`codec_dec_flops`、`codec_enc_time`、`codec_dec_time`）。`args.max_samples` 同样生效，不设则跑完整数据集后取平均。
 

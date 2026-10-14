@@ -17,7 +17,7 @@ from typing import Optional
 
 from torch import Tensor, nn
 
-from ..util.misc import _get_activation_fn, _get_clones
+from .utils import _get_activation_fn, _get_clones
 
 
 class TransformerEncoder(nn.Module):
