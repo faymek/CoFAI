@@ -13,10 +13,13 @@ class CocoDetectionMeter:
         self.ann_file = str(ann_file)
         self.score_thr = float(score_thr)
         self.results: List[Dict[str, Any]] = []
+        self.image_ids: set[int] = set()
         if not Path(self.ann_file).is_file():
             raise FileNotFoundError(f"COCO ann_file not found: {self.ann_file}")
 
     def update(self, pred: Any, gt: Any) -> None:
+        image_id = int(gt["image_id"])
+        self.image_ids.add(image_id)
         dets = pred
         if dets is None:
             return
@@ -27,8 +30,7 @@ class CocoDetectionMeter:
             if score < self.score_thr:
                 continue
             item = dict(det)
-            if gt and isinstance(gt, dict) and "image_id" in gt and "image_id" not in item:
-                item["image_id"] = int(gt["image_id"])
+            item.setdefault("image_id", image_id)
             self.results.append(item)
 
     def compute(self) -> Dict[str, float]:
@@ -53,8 +55,7 @@ class CocoDetectionMeter:
         try:
             coco_dt = coco_gt.loadRes(tmp_path)
             coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
-            img_ids = sorted({int(d["image_id"]) for d in self.results})
-            coco_eval.params.imgIds = img_ids
+            coco_eval.params.imgIds = sorted(self.image_ids)
             coco_eval.evaluate()
             coco_eval.accumulate()
             coco_eval.summarize()

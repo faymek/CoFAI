@@ -108,6 +108,7 @@ class DinoFeatureCodecModel(CompressionModel):
                 feat,
                 orig_size=det_gt.get("orig_size"),
                 image_id=det_gt.get("image_id"),
+                valid_roi=det_gt.get("valid_roi"),
             )
         if "rae" in tasks:
             feat = self.dino.decode_rae(h_hat, token_res)

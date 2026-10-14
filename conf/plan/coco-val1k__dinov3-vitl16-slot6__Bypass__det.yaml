@@ -51,4 +51,3 @@ model:
     det:
       type: Dinov3PlainDETRHead
       checkpoint: ${PROJECT_ROOT}/weights/dinov3/det_head/plain_detr_dinov3_vitl16_checkpoint_best.pth
-      dinov3_src: ${PROJECT_ROOT}/vendor/dinov3

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Any, Optional, Sequence
 
 import torch
@@ -17,9 +18,6 @@ class _StubDinoViT(nn.Module):
     embed_dim = 1024
     patch_size = 16
 
-    def named_parameters(self, recurse: bool = True):
-        return iter(())
-
 
 class Dinov3PlainDETRHead(nn.Module):
     """Wrap Plain-DETR transformer / box head; features come from CTC timm taps."""
@@ -27,15 +25,21 @@ class Dinov3PlainDETRHead(nn.Module):
     def __init__(
         self,
         checkpoint: str,
-        dinov3_src: str,
+        dinov3_src: Optional[str] = None,
         score_thr: float = 0.001,
         topk: int = 100,
     ):
         super().__init__()
         self.score_thr = float(score_thr)
-        src = os.path.expanduser(str(dinov3_src))
-        if src not in sys.path:
-            sys.path.insert(0, src)
+        src = (
+            Path(dinov3_src).expanduser()
+            if dinov3_src is not None
+            else Path(__file__).resolve().parents[2] / "vendor" / "dinov3"
+        )
+        if not (src / "dinov3" / "eval" / "detection").is_dir():
+            raise FileNotFoundError(f"DINOv3 detection source not found: {src}")
+        if str(src) not in sys.path:
+            sys.path.insert(0, str(src))
 
         from dinov3.eval.detection.config import DetectionHeadConfig
         from dinov3.eval.detection.models.detr import PostProcess, build_model
@@ -95,7 +99,7 @@ class Dinov3PlainDETRHead(nn.Module):
             for k, v in state.items()
             if not str(k).startswith("backbone.0.backbone")
         }
-        model.load_state_dict(filtered, strict=False)
+        model.load_state_dict(filtered, strict=True)
         model.eval()
         self.model = model
         self.postprocess = PostProcess(topk=int(topk), reparam=False)
@@ -106,8 +110,9 @@ class Dinov3PlainDETRHead(nn.Module):
         feats: Sequence[torch.Tensor],
         orig_size: Optional[Any] = None,
         image_id: Optional[int] = None,
+        valid_roi: Optional[dict] = None,
     ):
-        if not feats:
+        if len(feats) != 4:
             raise ValueError("Dinov3PlainDETRHead.predict expects 4 tap feature maps")
         xs = [f.float() for f in feats]
         concat_feat = torch.cat(xs, dim=1)
@@ -176,8 +181,27 @@ class Dinov3PlainDETRHead(nn.Module):
                 orig_w = int(feat_w * 16)
             else:
                 orig_h, orig_w = int(orig_size[0]), int(orig_size[1])
-            orig_sizes = torch.tensor([[orig_h, orig_w]], device=device)
+            canvas_h, canvas_w = int(feat_h * 16), int(feat_w * 16)
+            has_padding = valid_roi is not None and (
+                valid_roi["top"] != 0
+                or valid_roi["left"] != 0
+                or valid_roi["height"] != canvas_h
+                or valid_roi["width"] != canvas_w
+            )
+            target_size = (canvas_h, canvas_w) if has_padding else (orig_h, orig_w)
+            orig_sizes = torch.tensor([target_size], device=device)
             results = self.postprocess(out, orig_sizes)
+            if has_padding:
+                offset = torch.tensor(
+                    [valid_roi["left"], valid_roi["top"]] * 2,
+                    device=device,
+                )
+                scale = torch.tensor(
+                    [orig_w / valid_roi["width"], orig_h / valid_roi["height"]] * 2,
+                    device=device,
+                )
+                for result in results:
+                    result["boxes"] = (result["boxes"] - offset) * scale
         finally:
             det.num_queries = save_nq
             det.transformer.two_stage_num_proposals = save_ts

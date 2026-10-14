@@ -191,7 +191,7 @@ def test_proposal_plans_are_local_and_expand_all_quality_points():
     dinov2_plans = sorted((PLAN_ROOT / "dinov2").glob("*.yaml"))
     dinov3_plans = sorted((PLAN_ROOT / "dinov3").glob("*.yaml"))
     assert len(dinov2_plans) == 14
-    assert len(dinov3_plans) == 2
+    assert len(dinov3_plans) == 5
 
     quality_count = 0
     for plan_path in [*dinov2_plans, *dinov3_plans]:
@@ -204,7 +204,7 @@ def test_proposal_plans_are_local_and_expand_all_quality_points():
         assert plan["multi_run"]
         assert all(isinstance(quality, int) for quality in plan["multi_run"])
         quality_count += len(plan["multi_run"])
-    assert quality_count == 106
+    assert quality_count == 118
 
 
 def test_dinov3_release_packager_matches_plan_quality_mapping(tmp_path):
@@ -215,7 +215,9 @@ def test_dinov3_release_packager_matches_plan_quality_mapping(tmp_path):
     )
 
     expected_names = list(RELEASE_NAMES.values())
-    for plan_path in sorted((PLAN_ROOT / "dinov3").glob("*.yaml")):
+    slot24_plans = sorted((PLAN_ROOT / "dinov3").glob("*slot24*.yaml"))
+    assert len(slot24_plans) == 2
+    for plan_path in slot24_plans:
         plan = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
         actual_names = [
             Path(overrides["model"]["dino_codec"]["orfc_weights_path"]).name
@@ -231,6 +233,21 @@ def test_dinov3_release_packager_matches_plan_quality_mapping(tmp_path):
     np.savez(invalid, norm_mode="split_reg_cls_patch", n_prefix=5)
     with pytest.raises(KeyError, match="identity metadata"):
         _validate_release_identity(invalid)
+
+
+def test_dinov3_slot6_plans_use_the_four_blk05_artifacts():
+    plans = sorted((PLAN_ROOT / "dinov3").glob("*slot6*.yaml"))
+    assert len(plans) == 3
+    assert {path.name.split("__")[-1] for path in plans} == {"semseg.yaml", "depth.yaml", "det.yaml"}
+    for path in plans:
+        plan = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert plan["model"]["dino_backbone"]["slot"] == 6
+        assert list(plan["multi_run"]) == [1, 2, 3, 4]
+        names = [
+            Path(overrides["model"]["dino_codec"]["orfc_weights_path"]).name
+            for overrides in plan["multi_run"].values()
+        ]
+        assert names == [f"blk05_K{k}_e32.npz" for k in (4, 8, 16, 256)]
 
 
 def test_published_dinov2_plans_cover_every_proposal_reference_point(tmp_path):

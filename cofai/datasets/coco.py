@@ -74,4 +74,6 @@ class CocoDetectionDataset(Dataset):
             }
         if self.transform:
             sample = self.transform(sample)
+        if "det" in sample:
+            sample["det"]["valid_roi"] = sample["meta"].get("valid_roi")
         return sample
