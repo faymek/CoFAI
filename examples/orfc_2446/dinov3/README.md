@@ -1,11 +1,8 @@
 # ORFC-2446 — DINOv3
 
-The DINOv3 integration evaluates ViT-L/16 slot24 on:
+The DINOv3 integration evaluates ViT-L/16 **slot24** (ADE20K / NYUv2) and **slot6** (ADE20K / NYUv2 / COCO val 1k detection).
 
-- ADE20K semantic segmentation
-- NYUv2 depth estimation
-
-Both plans use the standard `DinoFeatureCodecModel` and
+All plans use the standard `DinoFeatureCodecModel` and
 `OrthoRotationFeatureCodec`.
 
 ## Environment and assets
@@ -27,10 +24,16 @@ unzip -jo "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori.zip" \
   -d "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori"
 unzip "$PROJECT_ROOT/data/ADE20K.zip" -d "$PROJECT_ROOT/data"
 unzip "$PROJECT_ROOT/data/NYU_subset_for_training_depth_head.zip" -d "$PROJECT_ROOT/data"
+unzip "$PROJECT_ROOT/data/coco_val_1k.zip" -d "$PROJECT_ROOT/data"
+mkdir -p "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_slot6"
+unzip -jo "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_slot6.zip" \
+  'blk05_*.npz' \
+  -d "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_slot6"
 ```
 
-The manifest installs the DINOv3 backbone, datasets, task heads, and the eight
-released ORFC-2446 artifacts consumed by the plans:
+The manifest installs the DINOv3 backbone, datasets, task heads, and SoftPQ zips.
+
+slot24 artifacts (`dinov3_vitl16_ori/`):
 
 ```text
 weights/orfc_2446/dinov3_vitl16_ori/
@@ -44,9 +47,11 @@ weights/orfc_2446/dinov3_vitl16_ori/
 └── blk23_K512_e8.npz
 ```
 
+slot6 artifacts (`dinov3_vitl16_slot6/`): `blk05_K{4,8,16,256}_e32.npz`, mapped to qualities 1–4.
+
 Each artifact contains `R`, `codebooks`, `pmf`, `norm_mode`, and `n_prefix`.
 
-The two plans use the same integer quality mapping:
+The two slot24 plans use the same integer quality mapping:
 
 | quality | artifact |
 | ---: | --- |
@@ -73,7 +78,7 @@ poetry -C "$PROJECT_ROOT" run cofai-eval \
   "args.output_dir=$PROJECT_ROOT/logs/orfc_2446/dinov3"
 ```
 
-Run both plans:
+Run both slot24 plans:
 
 ```bash
 GPU_IDS=0,1 \
@@ -82,6 +87,38 @@ bash examples/orfc_2446/dinov3/scripts/run_eval_release_ctc.sh
 
 Results are written below
 `$PROJECT_ROOT/logs/orfc_2446/dinov3/<plan>/q<quality>/`.
+
+## Slot6 evaluation
+
+Slot6 codes the output of block 5 and runs blocks 6–23 on the decoding side. The three plans use the common [DINOv3 test conditions](../../ctc/README-DINOv3.md) with the ADE20K-trained SoftPQ artifacts. Segmentation and depth use the final-layer features; detection uses taps at blocks 5, 11, 17, and 23.
+
+Run the four real rANS qualities for each task:
+
+```bash
+for plan in \
+  ade20k-val__dinov3-vitl16-slot6__ORFC__semseg \
+  nyuv2-val__dinov3-vitl16-slot6__ORFC__depth \
+  coco-val1k__dinov3-vitl16-slot6__ORFC__det
+do
+  PYTHONPATH="$SOURCE_ROOT" CUDA_VISIBLE_DEVICES=0 \
+  poetry -C "$PROJECT_ROOT" run cofai-eval \
+    "$SOURCE_ROOT/examples/orfc_2446/plan/dinov3/$plan.yaml" \
+    args.multi_run=true args.cuda=true args.real=true
+done
+```
+
+Aggregate results are written to `$PROJECT_ROOT/logs/<plan>/summary.json`.
+
+### Author-reported slot6 results
+
+The following values were reported in the original contribution. They predate the COCO evaluation-set and padding-coordinate corrections and are not the corrected reproduction results.
+
+| q | Codebook | ADE bpp / mIoU | NYUv2 bpp / RMSE | COCO 1k bpp / bpfp / AP / AP50 |
+|---|------|----------------|------------------|--------------------------------|
+| 1 | K4e32 | 0.252 / 0.4918 | 0.234 / 0.3973 | 1.266 / 0.0553 / 0.4489 / 0.6544 |
+| 2 | K8e32 | 0.377 / 0.5110 | 0.360 / 0.3904 | 1.984 / 0.0867 / 0.4932 / 0.6982 |
+| 3 | K16e32 | 0.504 / 0.5140 | 0.482 / 0.3797 | 2.711 / 0.1183 / 0.5060 / 0.7155 |
+| 4 | K256e32 | 1.024 / 0.5275 | 0.993 / 0.3626 | 5.633 / 0.2459 / 0.5359 / 0.7437 |
 
 ## Offline training and diagnostics
 
