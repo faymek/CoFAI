@@ -89,6 +89,7 @@ test_transforms:
   - type: cofai.transforms.PadToMultiple
     multiple: 64
 task_configs:
+  # Detection plans additionally support kind: det with a CocoDetectionMeter.
   - label: cls
     meter: ${metrics.cls_metrics}
 model:
@@ -197,7 +198,6 @@ Task kinds identify a limited set of ground-truth semantics. Output labels may b
 - **`label` / `out_key`** identifies the model's `task_feats` output. For example, `rec1` and `rec2` may both use `kind=rec`.
 - The evaluation loop reads ground truth by kind and predictions by label, then supplies the aligned pair to the task meter.
 - Valid kinds are defined by `ALLOWED_KINDS` in `cofai.engine.evaluator`: `rec`, `semseg`, `cls`, `depth`, `edge`, `sal`, `normals`, `scene`, `human_parts`, and `vqa`. Invalid explicit kinds fail validation.
-- Detection additionally uses `kind=det`. Its dataset supplies image metadata so the head can map padded predictions back to the original image coordinates.
 
 For migration from older implementations, use `kind=rec` for reconstruction even when its output label is named differently, such as `rae`. Use `semseg` for semantic segmentation rather than `seg`.
 
