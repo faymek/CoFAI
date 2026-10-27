@@ -1,7 +1,8 @@
 """Orthogonal-rotation product quantization for DINO feature tokens.
 
 The runtime codec consumes a released ``.npz`` artifact containing ``R``,
-``codebooks`` and ``pmf``. Training and artifact export live with the proposal
+``codebooks`` and ``pmf``. ``use_transform=False`` disables the rotation.
+Training and artifact export live with the proposal
 under ``examples/orfc_2446/offline``; this module only implements the stable
 LatentCodec contract used by the evaluation engine.
 """
@@ -55,6 +56,7 @@ def load_orfc_artifact(path: str | Path) -> dict[str, Any]:
         pmf = np.asarray(data["pmf"], dtype=np.float32)
         norm_mode = str(_scalar(data, "norm_mode", "per_image"))
         n_prefix = int(_scalar(data, "n_prefix", 0))
+        use_transform = bool(_scalar(data, "use_transform", True))
 
     if codebooks.ndim != 3:
         raise ValueError(
@@ -88,6 +90,7 @@ def load_orfc_artifact(path: str | Path) -> dict[str, Any]:
         "pmf": pmf.astype(np.float32),
         "norm_mode": norm_mode,
         "n_prefix": n_prefix,
+        "use_transform": use_transform,
         "groups": int(groups),
         "entries": int(entries),
         "embedding_dim": int(embedding_dim),
@@ -122,6 +125,7 @@ class OrthoRotationFeatureCodec(nn.Module):
         self.feat_dim = artifact["feature_dim"]
         self.norm_mode = str(norm_mode or artifact["norm_mode"])
         self.n_prefix = artifact["n_prefix"] if n_prefix is None else int(n_prefix)
+        self.use_transform = artifact["use_transform"]
 
         if K is not None and int(K) != self.K:
             raise ValueError(f"Configured K={K} does not match artifact K={self.K}")
@@ -135,7 +139,9 @@ class OrthoRotationFeatureCodec(nn.Module):
         if self.n_prefix < 0:
             raise ValueError(f"ORFC n_prefix must be non-negative, got {self.n_prefix}")
 
-        self.register_buffer("R", torch.from_numpy(artifact["R"]))
+        self.register_buffer(
+            "R", torch.from_numpy(artifact["R"]) if self.use_transform else None
+        )
         self.register_buffer("codebooks", torch.from_numpy(artifact["codebooks"]))
         self.entropy_model = StaticCategoricalEntropyModel(
             torch.from_numpy(artifact["pmf"])
@@ -156,7 +162,9 @@ class OrthoRotationFeatureCodec(nn.Module):
             mode=self.norm_mode,
             n_prefix=self.n_prefix,
         )
-        rotated = normalized.reshape(batch_size * n_tokens, feature_dim) @ self.R
+        rotated = normalized.reshape(batch_size * n_tokens, feature_dim)
+        if self.use_transform:
+            rotated = rotated @ self.R
         sub_vectors = rotated.reshape(
             batch_size * n_tokens,
             self.num_groups,
@@ -184,7 +192,9 @@ class OrthoRotationFeatureCodec(nn.Module):
             batch_size * n_tokens,
             self.feat_dim,
         )
-        normalized_hat = (rotated_hat @ self.R.T).reshape(
+        if self.use_transform:
+            rotated_hat = rotated_hat @ self.R.T
+        normalized_hat = rotated_hat.reshape(
             batch_size,
             n_tokens,
             self.feat_dim,
@@ -214,7 +224,7 @@ class OrthoRotationFeatureCodec(nn.Module):
                 f"ORFC normalization stream has {values.size} floats; expected {expected_values}"
             )
         stats = (
-            torch.from_numpy(values.copy()).reshape(2, *stats_shape).to(self.R.device)
+            torch.from_numpy(values.copy()).reshape(2, *stats_shape).to(self.codebooks.device)
         )
         return stats[0], stats[1]
 

@@ -101,3 +101,66 @@ def test_pqfc_train_imports_orfc_2446_not_entropy_models():
     assert callable(train_soft_pq)
     assert callable(save_codec_npz)
     assert OrthogonalTransform.__name__ == "OrthogonalTransform"
+
+
+def _write_pqfc_artifact(path, use_transform):
+    rng = np.random.default_rng(7)
+    payload = {
+        "R": np.eye(4, dtype=np.float32),
+        "codebooks": rng.standard_normal((2, 4, 2), dtype=np.float32),
+        "pmf": np.full((2, 4), 0.25, dtype=np.float32),
+        "norm_mode": np.asarray("split_reg_cls_patch"),
+        "n_prefix": np.asarray(3, dtype=np.int32),
+    }
+    if use_transform is not None:
+        payload["use_transform"] = np.bool_(use_transform)
+    np.savez(path, **payload)
+    return path
+
+
+@pytest.mark.parametrize("flag", [None, True, False])
+def test_pqfc_transform_metadata_controls_runtime(tmp_path, monkeypatch, flag):
+    from cofai.latent_codecs.orfc import load_orfc_artifact
+    from examples.orfc_2446.offline.artifacts import load_softpq_npz
+    from examples.pqfc.run_pqfc_dinov3 import _load_npz_codec
+
+    path = _write_pqfc_artifact(tmp_path / "codec.npz", flag)
+    enabled = flag is not False
+    assert load_orfc_artifact(path)["use_transform"] is enabled
+    assert load_softpq_npz(path)["use_transform"] is enabled
+    codec, metadata = _load_npz_codec(path, torch.device("cpu"))
+    assert codec.use_transform is enabled
+    assert metadata["use_transform"] is enabled
+    assert (codec.R is not None) is enabled
+    assert ("R" in codec.state_dict()) is enabled
+
+    calls = []
+    matmul = torch.Tensor.__matmul__
+
+    def track(left, right):
+        calls.append((tuple(left.shape), tuple(right.shape)))
+        return matmul(left, right)
+
+    monkeypatch.setattr(torch.Tensor, "__matmul__", track)
+    tokens = torch.randn(1, 8, 4)
+    coded = codec.compress(tokens)
+    decoded = codec.decompress(**coded)
+    assert calls == ([((8, 4), (4, 4))] * 2 if enabled else [])
+    assert torch.equal(decoded["h_hat"], codec(tokens)["h_hat"])
+
+
+def test_pqfc_nor_preserves_identity_rotation_streams_and_reconstruction(tmp_path):
+    baseline = OrthoRotationFeatureCodec(
+        orfc_weights_path=str(_write_pqfc_artifact(tmp_path / "legacy.npz", None))
+    )
+    nor = OrthoRotationFeatureCodec(
+        orfc_weights_path=str(_write_pqfc_artifact(tmp_path / "nor.npz", False))
+    )
+    tokens = torch.randn(2, 8, 4)
+    before = baseline.compress(tokens)
+    after = nor.compress(tokens)
+    assert before == after
+    before_reconstruction = baseline.decompress(**before)["h_hat"]
+    after_reconstruction = nor.decompress(**after)["h_hat"]
+    assert torch.equal(before_reconstruction, after_reconstruction)
+    assert torch.equal(baseline(tokens)["h_hat"], nor(tokens)["h_hat"])
