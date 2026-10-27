@@ -29,6 +29,6 @@ weights/dinov3/det_head/plain_detr_dinov3_vitl16_checkpoint_best.pth  sha256:5b7
 
 # --- SoftPQ 量化权重压缩包 ---
 # 解压后得到 weights/orfc_2446/dinov3_vitl16_ori/*.npz（slot24）。
-weights/orfc_2446/dinov3_vitl16_ori.zip  sha256:8086eba833f4e10ed30e0f4e0e4778927e3b4fa9f9b23fd73726eaef3aa8237a
+weights/orfc_2446/dinov3_vitl16_ori.zip  sha256:8086eba8
 # 解压后得到 weights/orfc_2446/dinov3_vitl16_slot6/blk05_K{4,8,16,256}_e32.npz。
-weights/orfc_2446/dinov3_vitl16_slot6.zip  sha256:32f5acf5
+weights/orfc_2446/dinov3_vitl16_slot6.zip  sha256:12292dbd
