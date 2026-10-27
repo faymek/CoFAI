@@ -364,9 +364,15 @@ def train_and_save(args) -> str:
 
 
 def main():
-    defaults = load_config().get("train_defaults", {})
-    p = argparse.ArgumentParser(description="DINOv3 blk23 PQFC offline training")
-    p.add_argument("--config", type=str, default=None)
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", type=str, default=None)
+    config_args, _ = config_parser.parse_known_args()
+    defaults = load_config(
+        Path(config_args.config) if config_args.config else None
+    ).get("train_defaults", {})
+    p = argparse.ArgumentParser(
+        description="DINOv3 blk23 PQFC offline training", parents=[config_parser]
+    )
     p.add_argument("--layer", type=str, default="blk23")
     p.add_argument("--K", type=int, required=True)
     p.add_argument("--embedding_dim", type=int, default=defaults.get("embedding_dim", 32))

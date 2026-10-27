@@ -62,7 +62,8 @@ def cmd_extract(args) -> None:
     t0 = time.time()
 
     for _idx, stem, sample in tqdm(
-        list(_iter_stems(dataset, task, cfg, subset)),
+        _iter_stems(dataset, task, cfg, subset),
+        total=len(dataset) if subset is None else None,
         desc=f"extract-{task}",
     ):
         n_total += 1

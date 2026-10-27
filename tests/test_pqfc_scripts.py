@@ -8,9 +8,12 @@ from pathlib import Path
 import subprocess
 import sys
 import textwrap
+from types import SimpleNamespace
 import zipfile
 
+import numpy as np
 import pytest
+import torch
 import yaml
 
 from cofai.utils.download import parse_manifest
@@ -166,6 +169,96 @@ def test_pqfc_reuses_existing_softpq_training_tools():
     assert train.load_config is config_utils.load_config
     assert train.train_soft_pq is soft_pq.train_soft_pq
     assert train.compute_histogram_pmf is artifacts.compute_histogram_pmf
+
+
+@pytest.mark.parametrize("custom_config", [False, True])
+@pytest.mark.parametrize("override_cli", [False, True])
+def test_training_config_defaults_and_cli_precedence(tmp_path, monkeypatch, custom_config, override_cli):
+    from examples.pqfc.offline import train_pqfc_dinov3 as train
+
+    cfg = yaml.safe_load((EXAMPLE / "configs/dinov3_blk23.yaml").read_text())
+    argv = ["train_pqfc_dinov3.py", "--K", "16"]
+    if custom_config:
+        cfg["train_defaults"].update({
+            "epochs": 77,
+            "batch_size": 9,
+            "max_train": 4321,
+            "norm_mode": "split_reg_cls_patch",
+        })
+        config_path = tmp_path / "custom.yaml"
+        config_path.write_text(yaml.safe_dump(cfg))
+        argv += ["--config", str(config_path)]
+    expected = dict(cfg["train_defaults"])
+    if override_cli:
+        argv += ["--epochs", "12", "--batch_size", "2", "--norm_mode", "per_token_ln"]
+        expected.update(epochs=12, batch_size=2, norm_mode="per_token_ln")
+
+    captured = []
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(train, "train_and_save", captured.append)
+    train.main()
+
+    assert len(captured) == 1
+    assert {key: getattr(captured[0], key) for key in expected} == expected
+
+
+@pytest.mark.parametrize("subset", [None, {"sample1"}])
+def test_val_extraction_streams_samples_and_preserves_outputs(tmp_path, monkeypatch, subset):
+    from examples.pqfc.offline import extract_val_features as extract
+
+    loaded, encoded = [], []
+
+    class Dataset:
+        def __len__(self):
+            return 3
+
+        def __getitem__(self, index):
+            loaded.append(index)
+            return {
+                "img": torch.full((3, 4, 4), float(index)),
+                "meta": {"img_name": f"sample{index}", "img_path": f"sample{index}.jpg"},
+            }
+
+    class Backbone:
+        def encode(self, image):
+            index = int(image[0, 0, 0, 0].item())
+            assert loaded == list(range(index + 1))
+            encoded.append(index)
+            return torch.full((1, 2, 4), float(index))
+
+    subset_path = None
+    if subset is not None:
+        subset_path = tmp_path / "subset.txt"
+        subset_path.write_text("\n".join(sorted(subset)))
+    cfg = {"patch_size": 4, "paths": {"val_feat_root": str(tmp_path / "features")}}
+    monkeypatch.setattr(extract, "load_config", lambda _: cfg)
+    monkeypatch.setattr(extract, "build_dataset", lambda *_: Dataset())
+    monkeypatch.setattr(extract, "build_backbone", lambda *_: Backbone())
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    args = SimpleNamespace(config=None, task="semseg", subset=subset_path, gpu=0)
+    extract.cmd_extract(args)
+
+    expected = [0, 1, 2] if subset is None else [1]
+    assert encoded == expected
+    feature_dir = tmp_path / "features/semseg"
+    assert sorted(path.stem for path in (feature_dir / "tokens").glob("*.npy")) == [
+        f"sample{index}" for index in expected
+    ]
+    for index in expected:
+        np.testing.assert_array_equal(
+            np.load(feature_dir / f"tokens/sample{index}.npy"),
+            np.full((2, 4), float(index), dtype=np.float32),
+        )
+        with np.load(feature_dir / f"meta/sample{index}.npz", allow_pickle=True) as meta:
+            np.testing.assert_array_equal(meta["token_hw"], [1, 1])
+            np.testing.assert_array_equal(meta["img_hw"], [4, 4])
+            assert meta["stem"].item() == f"sample{index}"
+
+    loaded.clear()
+    encoded.clear()
+    extract.cmd_extract(args)
+    assert not encoded
 
 
 def test_native_multi_run_fails_on_missing_quality(tmp_path, monkeypatch):
