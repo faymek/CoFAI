@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Download CTC DINOv3 data/weights, unzip datasets, normalize backbone path.
+# Download and unpack CTC DINOv3 data and codec weights.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/_env.sh"
-PQFC_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$SOURCE_ROOT"
 
 MANIFEST="${MANIFEST:-examples/pqfc/dinov3-pqfc.manifest.txt}"
@@ -28,9 +27,8 @@ else
   echo "[1/3] SKIP_DOWNLOAD=1 — skip cofai-download"
 fi
 
-echo "[2/3] Unzip datasets if needed..."
-mkdir -p "$PROJECT_ROOT/data" "$PROJECT_ROOT/weights/dinov3/backbone" \
-  "$PROJECT_ROOT/features/train/dinov3_vitl16"
+echo "[2/3] Unzip datasets and codec weights if needed..."
+mkdir -p "$PROJECT_ROOT/data" "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori"
 
 if [[ -f "$PROJECT_ROOT/data/ADE20K.zip" && ! -d "$PROJECT_ROOT/data/ADEChallengeData2016" ]]; then
   unzip -q -o "$PROJECT_ROOT/data/ADE20K.zip" -d "$PROJECT_ROOT/data/"
@@ -39,20 +37,9 @@ if [[ -f "$PROJECT_ROOT/data/NYU_subset_for_training_depth_head.zip" && ! -d "$P
   unzip -q -o "$PROJECT_ROOT/data/NYU_subset_for_training_depth_head.zip" -d "$PROJECT_ROOT/data/"
 fi
 
-ORFC_FEAT="$(dirname "$PROJECT_ROOT")/ORFC/features/train/dinov3_vitl16/blk23"
-LOCAL_FEAT="$PROJECT_ROOT/features/train/dinov3_vitl16/blk23"
-if [[ ! -e "$LOCAL_FEAT" && -d "$ORFC_FEAT" ]]; then
-  ln -s "$ORFC_FEAT" "$LOCAL_FEAT"
-  echo "  linked $LOCAL_FEAT -> $ORFC_FEAT"
-fi
-
-BB_DIR="$PROJECT_ROOT/weights/dinov3/backbone"
-SAFE="$BB_DIR/dinov3_vitl16_pretrain_lvd1689m.safetensors"
-PTH="$BB_DIR/dinov3_vitl16_pretrain_lvd1689m.pth"
-if [[ -f "$SAFE" && ! -e "$PTH" ]]; then
-  ln -s "$(basename "$SAFE")" "$PTH"
-elif [[ -f "$PTH" && ! -e "$SAFE" ]]; then
-  ln -s "$(basename "$PTH")" "$SAFE"
+ORFC_ZIP="$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori.zip"
+if [[ -f "$ORFC_ZIP" ]]; then
+  unzip -q -j -n "$ORFC_ZIP" 'blk23_*.npz' -d "$PROJECT_ROOT/weights/orfc_2446/dinov3_vitl16_ori/"
 fi
 
 echo "[3/3] Check required paths..."
@@ -67,12 +54,29 @@ check() {
 }
 check "$PROJECT_ROOT/data/ADEChallengeData2016"
 check "$PROJECT_ROOT/data/NYU"
+check "$PROJECT_ROOT/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors"
 check "$PROJECT_ROOT/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth"
 check "$PROJECT_ROOT/weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth"
-if [[ -e "$PTH" || -e "$SAFE" ]]; then
-  echo "  OK  backbone (.pth or .safetensors)"
-else
-  echo "  MISSING  backbone"
+if ! $PYTHON - <<'PY'
+import os
+from pathlib import Path
+
+import yaml
+
+root = os.environ["PROJECT_ROOT"]
+paths = set()
+for plan_path in (Path(os.environ["SOURCE_ROOT"]) / "examples/pqfc/plan/dinov3").glob("*__PQFC*.yaml"):
+    plan = yaml.safe_load(plan_path.read_text())
+    for config in [plan, *plan["multi_run"].values()]:
+        paths.add(config["model"]["dino_codec"]["orfc_weights_path"].replace("${PROJECT_ROOT}", root))
+missing = sorted(path for path in paths if not Path(path).is_file())
+for path in missing:
+    print(f"  MISSING  {path}")
+if not missing:
+    print(f"  OK  all {len(paths)} codec artifacts required by the plans")
+raise SystemExit(bool(missing))
+PY
+then
   ok=0
 fi
 

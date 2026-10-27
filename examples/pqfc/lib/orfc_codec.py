@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import math
-from pathlib import Path
-from typing import Sequence
-
 import numpy as np
 import torch
 
@@ -58,15 +54,6 @@ def resolve_norm_settings(
     return resolved_mode, resolved_prefix, source
 
 
-def norm_sideinfo_bits(norm_mode: str, n_prefix: int, n_tokens: int) -> float:
-    del n_tokens
-    if norm_mode in SPLIT_NORM_MODES and n_prefix > 0:
-        return 4 * 16
-    if norm_mode == "per_image":
-        return 2 * 16
-    return 0.0
-
-
 def encode_decode_single(
     feat_td: np.ndarray,
     codec,
@@ -91,43 +78,3 @@ def encode_decode_single(
             y_hat, mu, std, mode=norm_mode, n_prefix=n_prefix
         )
     return x_hat.squeeze(0).cpu().numpy()
-
-
-def encode_decode_batch(
-    features: Sequence[np.ndarray],
-    codec,
-    norm_mode: str,
-    device,
-    n_prefix: int = 0,
-    chunk_images: int | None = None,
-) -> list[np.ndarray]:
-    from examples.orfc_2446.offline.soft_pq import soft_pq_encode_decode
-
-    del chunk_images
-    return soft_pq_encode_decode(
-        list(features),
-        codec,
-        norm_mode,
-        device,
-        n_prefix=n_prefix,
-    )
-
-
-def theoretical_bpfp(codec, embed_dim: int) -> float:
-    pq = codec.pq
-    bpt = pq.G * math.log2(pq.K)
-    return bpt / embed_dim
-
-
-def infer_norm_mode_from_name(path_or_name: str | None) -> str | None:
-    if not path_or_name:
-        return None
-    name = Path(path_or_name).name
-    for suf in (".pt", ".npz", ".pth", ".json"):
-        if name.endswith(suf):
-            name = name[: -len(suf)]
-            break
-    for mode in ("split_reg_cls_patch", "split_cls_patch", "per_token_ln"):
-        if mode in name:
-            return mode
-    return None

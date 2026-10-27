@@ -15,21 +15,24 @@ import torch
 from tqdm import tqdm
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
-_EXAMPLE_DIR = Path(__file__).resolve().parent
-for _p in (_SOURCE_ROOT, _EXAMPLE_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
 
-from lib.config_utils import load_config, resolve_project_root, task_feat_dir
-from lib.dataset_utils import (
+from examples.pqfc.lib.config_utils import load_config, resolve_project_root, task_feat_dir
+from examples.pqfc.lib.dataset_utils import (
     build_backbone,
     build_dataset,
     build_head,
     build_meter,
     load_subset,
+    sample_stem,
 )
-from lib.orfc_codec import NORM_MODE_CHOICES, encode_decode_single, resolve_norm_settings
-from lib.rate_eval import evaluate_rate
+from examples.pqfc.lib.orfc_codec import (
+    NORM_MODE_CHOICES,
+    encode_decode_single,
+    resolve_norm_settings,
+)
+from examples.pqfc.lib.rate_eval import evaluate_rate
 
 
 def _fail(msg: str, code: int = 1) -> None:
@@ -38,8 +41,6 @@ def _fail(msg: str, code: int = 1) -> None:
 
 
 def _build_stem_index(dataset, task: str, cfg: dict) -> dict[str, int]:
-    from lib.dataset_utils import sample_stem
-
     nyu_root = cfg["datasets"]["depth"]["root"] if task == "depth" else None
     index: dict[str, int] = {}
     for idx in tqdm(range(len(dataset)), desc=f"index-{task}", leave=False):
@@ -68,7 +69,7 @@ def _load_npz_codec(ckpt_path: Path, device: torch.device):
     ckpt_meta = {
         "norm_mode": payload["norm_mode"],
         "n_prefix": payload["n_prefix"],
-        "use_transform": bool(payload.get("use_transform", True)),
+        "use_transform": payload["use_transform"],
     }
     codec = OrthoRotationFeatureCodec(
         orfc_weights_path=str(ckpt_path),

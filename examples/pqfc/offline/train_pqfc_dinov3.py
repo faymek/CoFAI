@@ -25,10 +25,8 @@ import numpy as np
 import torch
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[3]
-_EXAMPLE_DIR = Path(__file__).resolve().parents[1]
-for _p in (_SOURCE_ROOT, _EXAMPLE_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
 
 from cofai.backbone import Dinov3TimmBackbone
 from cofai.latent_codecs.orfc_normalization import normalize_orfc_features
@@ -40,9 +38,9 @@ from examples.orfc_2446.offline.soft_pq import (
     save_codec,
     train_soft_pq,
 )
-from lib.config_utils import load_config, resolve_project_root
-from lib.distortion_metrics import eval_val_distortion
-from lib.orfc_codec import NORM_MODE_CHOICES, resolve_n_prefix
+from examples.pqfc.lib.config_utils import load_config, resolve_project_root
+from examples.pqfc.lib.distortion_metrics import eval_val_distortion
+from examples.pqfc.lib.orfc_codec import NORM_MODE_CHOICES, resolve_n_prefix
 
 
 def _apply_transform_tau_binding(args):
@@ -164,11 +162,6 @@ def train_and_save(args) -> str:
 
     print(f"\nLoading DINOv3 backbone for frozen tail (layer_idx={layer_idx})...")
     bb_path = Path(cfg["paths"]["backbone"])
-    if not bb_path.is_file():
-        alt = bb_path.with_suffix(".safetensors" if bb_path.suffix == ".pth" else ".pth")
-        if alt.is_file():
-            bb_path = alt
-            print(f"  backbone fallback → {bb_path}")
     backbone = Dinov3TimmBackbone(
         model_size="large",
         img_size=512,

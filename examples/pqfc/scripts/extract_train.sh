@@ -15,8 +15,6 @@ if [[ -n "${IMAGENET_ROOT:-}" ]]; then
 fi
 if [[ -n "${PATHNAME_LIST:-}" ]]; then
   EXTRA+=(--pathname_list "$PATHNAME_LIST")
-elif [[ -f "$(dirname "$PROJECT_ROOT")/utils/imagenet_selected_pathname5000.txt" ]]; then
-  EXTRA+=(--pathname_list "$(dirname "$PROJECT_ROOT")/utils/imagenet_selected_pathname5000.txt")
 fi
 if [[ -n "${OUTPUT_DIR:-}" ]]; then
   EXTRA+=(--output_dir "$OUTPUT_DIR")

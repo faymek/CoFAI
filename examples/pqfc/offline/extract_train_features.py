@@ -17,49 +17,17 @@ from torchvision import transforms
 from tqdm import tqdm
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[3]
-_EXAMPLE_DIR = Path(__file__).resolve().parents[1]
-for _p in (_SOURCE_ROOT, _EXAMPLE_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
 
 from cofai.backbone.timm import Dinov3TimmBackbone
-from lib.config_utils import resolve_project_root as _resolve_pr
-
-
-def _default_pathname_list(project_root: Path) -> Path:
-    featcodec_root = project_root.parent
-    candidates = [
-        featcodec_root / "utils" / "imagenet_selected_pathname5000.txt",
-        project_root / "data" / "imagenet_selected_pathname5000.txt",
-        _SOURCE_ROOT / "data" / "imagenet_selected_pathname5000.txt",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return path
-    return candidates[0]
-
-
-def _default_imagenet_root(project_root: Path) -> Path:
-    candidates = [
-        project_root.parent / "data" / "imagenet" / "images" / "val",
-        project_root / "data" / "imagenet" / "images" / "val",
-        project_root / "data" / "ImageNet_val",
-    ]
-    for path in candidates:
-        if path.is_dir():
-            return path
-    return candidates[0]
+from examples.pqfc.lib.config_utils import resolve_project_root as _resolve_pr
 
 
 def _resolve_backbone(path: str, project_root: Path) -> str:
     p = Path(path)
     if not p.is_absolute():
         p = project_root / p
-    if p.is_file():
-        return str(p)
-    alt = p.with_suffix(".safetensors" if p.suffix == ".pth" else ".pth")
-    if alt.is_file():
-        return str(alt)
     return str(p)
 
 
@@ -90,8 +58,14 @@ def load_image_paths(pathname_list: str, imagenet_root: str):
 def main():
     project_root = _resolve_pr()
     p = argparse.ArgumentParser(description="Extract DINOv3 ImageNet features for PQFC train")
-    p.add_argument("--pathname_list", type=str, default=str(_default_pathname_list(project_root)))
-    p.add_argument("--imagenet_root", type=str, default=str(_default_imagenet_root(project_root)))
+    p.add_argument(
+        "--pathname_list", type=str,
+        default=str(project_root / "data/imagenet_selected_pathname5000.txt"),
+    )
+    p.add_argument(
+        "--imagenet_root", type=str,
+        default=str(project_root / "data/imagenet/images/val"),
+    )
     p.add_argument(
         "--backbone_ckpt",
         default="weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors",

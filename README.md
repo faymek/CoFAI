@@ -132,6 +132,7 @@ A dash indicates that no confirmed AITISA proposal number is listed.
 | VTC | AI M2418; AI M2448 | Dual-path visual-token coding with DINOv2; DINOv3 feature coding | [VTC guide](examples/vtc/README.md) |
 | ORFC | AI M2411 | Product-quantization-based coding of intermediate ViT features | [ORFC guide](examples/orfc/README.md) |
 | Soft-PQ / ORFC | AI M2446 | Learnable product-quantization feature coding with an orthogonal transform | [Soft-PQ guide](examples/orfc_2446/README.md) |
+| PQFC | AI M2488 | Product-quantization feature coding with an optional orthogonal transform | [PQFC guide](examples/pqfc/README.md) |
 | GPS | AI M2405 | Graph-partition-based representation optimization for multi-view image search | [GPS guide](examples/gps/README.md) |
 | Token Grouping | AI M2460 | Graph-partition-based token grouping for foundation-model feature coding | [GPS guide](examples/gps/README.md) |
 | RFC | AI M2268 | Semantic feature disentanglement and compact representation with multi-task ViT models | [RFC guide](examples/rfc/README.md) |

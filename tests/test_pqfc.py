@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pytest
+import torch
 import yaml
 
 from cofai.latent_codecs import OrthoRotationFeatureCodec
@@ -61,6 +64,19 @@ def test_pqfc_transform_weights_are_orfc_2446_release():
         assert names == RELEASE_NAMES
 
 
+@pytest.mark.parametrize("task", ["semseg", "depth"])
+def test_pqfc_transform_plans_match_m2446_release(task):
+    [pqfc_path] = PLAN_ROOT.glob(f"*slot24__PQFC__{task}.yaml")
+    orfc_root = Path(__file__).resolve().parents[1] / "examples/orfc_2446/plan/dinov3"
+    [orfc_path] = orfc_root.glob(f"*slot24__ORFC__{task}.yaml")
+    pqfc = yaml.safe_load(pqfc_path.read_text())
+    orfc = yaml.safe_load(orfc_path.read_text())
+    for plan in (pqfc, orfc):
+        plan.pop("name")
+        plan.pop("description")
+    assert pqfc == orfc
+
+
 def test_pqfc_nor_weights_use_canonical_dir():
     for plan_path in _plans("__PQFC-noR__"):
         plan = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
@@ -80,7 +96,7 @@ def test_pqfc_nor_weights_use_canonical_dir():
             assert path.endswith("_no_transform.npz")
 
 
-def test_pqfc_train_imports_orfc_2446_not_entropy_models():
+def test_pqfc_train_uses_example_local_training_and_public_ops():
     train_src = (
         Path(__file__).resolve().parents[1]
         / "examples/pqfc/offline/train_pqfc_dinov3.py"

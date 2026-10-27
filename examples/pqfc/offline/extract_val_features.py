@@ -14,13 +14,16 @@ import torch
 from tqdm import tqdm
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[3]
-_EXAMPLE_DIR = Path(__file__).resolve().parents[1]
-for _p in (_SOURCE_ROOT, _EXAMPLE_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
 
-from lib.config_utils import load_config, resolve_project_root, task_feat_dir
-from lib.dataset_utils import build_backbone, build_dataset, load_subset, sample_stem
+from examples.pqfc.lib.config_utils import load_config, resolve_project_root, task_feat_dir
+from examples.pqfc.lib.dataset_utils import (
+    build_backbone,
+    build_dataset,
+    load_subset,
+    sample_stem,
+)
 
 
 def _fail(msg: str, code: int = 1) -> None:

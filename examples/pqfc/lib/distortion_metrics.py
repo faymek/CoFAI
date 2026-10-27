@@ -81,7 +81,7 @@ def eval_reconstruction_mse(
     n_prefix: int,
     device: torch.device,
 ) -> dict:
-    from lib.orfc_codec import encode_decode_single
+    from examples.pqfc.lib.orfc_codec import encode_decode_single
 
     codec.eval()
     sq = []
