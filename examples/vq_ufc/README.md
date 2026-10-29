@@ -25,7 +25,17 @@ The engine runs the DINOv3 backbone, VQ-UFC, and a downstream task head. Invoke 
 2. Use a CoFAI worktree containing `DinoFeatureCodecModel`, the DINOv3 backbone and task head, the dataset loader, and a matching evaluation plan.
 3. The checkpoint must contain the model configuration, codebook, entropy logits, and prefix/patch RMS. The separate training `.npz` is not needed for evaluation.
 
-VQ-UFC checkpoints: [download link](https://pan.quark.cn/s/0eeea25c643c).
+### Download Checkpoints
+
+Run from the repository root to download the 16 VQ-UFC checkpoints from CoFAI-share with SHA256 verification:
+
+```bash
+poetry run cofai-download examples/vq_ufc/dinov3-vqufc.manifest.txt
+```
+
+Files are saved under `$PROJECT_ROOT/weights/vq_ufc/dinov3/rd_points/`, as specified by both plans; no extraction is needed. For datasets, backbone weights, and task-head weights, see the [DINOv3 CTC guide](../ctc/README-DINOv3.md).
+
+Original checkpoints: [author's download](https://pan.quark.cn/s/0eeea25c643c).
 
 ### Commands
 

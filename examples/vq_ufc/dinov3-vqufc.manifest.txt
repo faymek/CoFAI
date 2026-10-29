@@ -1,0 +1,23 @@
+# AI M2507 VQ-UFC DINOv3 codec checkpoints (cofai-download).
+# Paths are relative to PROJECT_ROOT.
+# URLs default to https://medialab.sjtu.edu.cn/files/CoFAI-share/<path>.
+
+# ADE-trained adapters (S01-S08).
+weights/vq_ufc/dinov3/rd_points/S01_N20.pth.tar  sha256:70868ecd
+weights/vq_ufc/dinov3/rd_points/S02_N48.pth.tar  sha256:0ee4e324
+weights/vq_ufc/dinov3/rd_points/S03_N72.pth.tar  sha256:13e65887
+weights/vq_ufc/dinov3/rd_points/S04_N96.pth.tar  sha256:69176ebe
+weights/vq_ufc/dinov3/rd_points/S05_N120.pth.tar  sha256:bbd76b68
+weights/vq_ufc/dinov3/rd_points/S06_N144.pth.tar  sha256:9c02f5d1
+weights/vq_ufc/dinov3/rd_points/S07_N192.pth.tar  sha256:f0abf06f
+weights/vq_ufc/dinov3/rd_points/S08_N240.pth.tar  sha256:fba2d982
+
+# NYU-trained adapters (T01-T08).
+weights/vq_ufc/dinov3/rd_points/T01_N20.pth.tar  sha256:d12ee221
+weights/vq_ufc/dinov3/rd_points/T02_N48.pth.tar  sha256:cbfd56d1
+weights/vq_ufc/dinov3/rd_points/T03_N72.pth.tar  sha256:e12a4dca
+weights/vq_ufc/dinov3/rd_points/T04_N96.pth.tar  sha256:d95d88d5
+weights/vq_ufc/dinov3/rd_points/T05_N120.pth.tar  sha256:44e2551d
+weights/vq_ufc/dinov3/rd_points/T06_N144.pth.tar  sha256:d91025aa
+weights/vq_ufc/dinov3/rd_points/T07_N192.pth.tar  sha256:7061c84f
+weights/vq_ufc/dinov3/rd_points/T08_N240.pth.tar  sha256:4c06b430
