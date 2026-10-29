@@ -1,0 +1,38 @@
+# @package _global_
+# Shared codec and checkpoints for MMStar and ODinW-13.
+model:
+  qwen_codec:
+    type: DSVFC
+    h_dim: 1152
+    y_dim: 256
+    z_dim: 192
+    groups: 16
+    spatial_merge_size: 2
+
+# Original author checkpoint contains qwen_codec.* plus optimizer/RNG state.
+load:
+  path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.4-epoch016.pth
+  strict: false
+  weights_only: false
+
+args:
+  real: true
+  multi_run: false
+
+# Independent single-rate checkpoints; the exact same files serve both tasks.
+multi_run:
+  q06_e12:
+    load:
+      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.6-epoch012.pth
+  q06_e16:
+    load:
+      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.6-epoch016.pth
+  q04_e16:
+    load:
+      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.4-epoch016.pth
+  q02_e16:
+    load:
+      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch016.pth
+  q02_e28:
+    load:
+      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch028.pth

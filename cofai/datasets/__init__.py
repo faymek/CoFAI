@@ -23,6 +23,7 @@ from .mlore import (
     collate_mlore,
 )
 from .mmstar import MMStarDataset
+from .odinw13 import ODinW13Dataset
 
 __all__ = [
     "ImageFolder",
@@ -46,4 +47,5 @@ __all__ = [
     "get_mlore_dataset",
     "collate_mlore",
     "MMStarDataset",
+    "ODinW13Dataset",
 ]

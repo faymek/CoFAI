@@ -604,7 +604,7 @@ class DinoSlideFeatureCodecModel(DinoFeatureCodecModel):
 
 @register("Qwen3vlFeatureCodecModel")
 class Qwen3vlFeatureCodecModel(CompressionModel):
-    """Compress Qwen3VL visual features for VQA text generation.
+    """Compress Qwen3VL visual features for VQA and generated-box detection.
 
     Extracts breakpoint tokens with :class:`~cofai.backbone.Qwen3VLBackbone`
     in ``(B, L, C)`` layout (same contract as :class:`DinoFeatureCodecModel`),
@@ -632,14 +632,26 @@ class Qwen3vlFeatureCodecModel(CompressionModel):
         self.qwen_codec = instantiate_class(qwen_codec)
 
     @staticmethod
-    def _vqa_prompt(task_data):
-        vqa = (task_data or {}).get("vqa")
-        if not isinstance(vqa, dict):
-            raise KeyError("Qwen VQA requires task_data['vqa'].")
-        prompt = vqa.get("prompt")
+    def _generation_prompt(task_data, task):
+        data = (task_data or {}).get(task)
+        if not isinstance(data, dict):
+            raise KeyError(f"Qwen generation requires task_data[{task!r}].")
+        prompt = data.get("prompt")
         if not isinstance(prompt, str):
-            raise TypeError("task_data['vqa']['prompt'] must be a string.")
+            raise TypeError(f"task_data[{task!r}]['prompt'] must be a string.")
         return prompt
+
+    def _decode_tasks(self, h_hat, token_res, tasks, task_data):
+        outputs = {}
+        for task in tasks:
+            if task not in {"vqa", "det"}:
+                raise ValueError(f"Unsupported Qwen generation task: {task}")
+            outputs[task] = self.qwen.decode_text(
+                h_hat,
+                prompt=self._generation_prompt(task_data, task),
+                token_res=token_res,
+            )
+        return outputs
 
     def forward_test(self, image, qp=0, tasks=None, task_data=None, **kwargs):
         with torch.inference_mode():
@@ -654,13 +666,9 @@ class Qwen3vlFeatureCodecModel(CompressionModel):
                 "codec_enc_time": codec_t / 2.0,
                 "codec_dec_time": codec_t / 2.0,
             }
-            task_feats = {}
-            if "vqa" in tasks:
-                task_feats["vqa"] = self.qwen.decode_text(
-                    coded_unit["h_hat"],
-                    prompt=self._vqa_prompt(task_data),
-                    token_res=token_res,
-                )
+            task_feats = self._decode_tasks(
+                coded_unit["h_hat"], token_res, tasks, task_data
+            )
             if "pstate" not in coded_unit:
                 coded_unit["pstate"] = {}
             coded_unit["pstate"]["token_res"] = token_res
@@ -686,14 +694,7 @@ class Qwen3vlFeatureCodecModel(CompressionModel):
         codec_t = time.time() - t0
         self._codec_time = getattr(self, "_codec_time", {})
         self._codec_time["codec_dec_time"] = codec_t
-        task_feats = {}
-        if "vqa" in tasks:
-            task_feats["vqa"] = self.qwen.decode_text(
-                decoded["h_hat"],
-                prompt=self._vqa_prompt(task_data),
-                token_res=token_res,
-            )
-        return task_feats
+        return self._decode_tasks(decoded["h_hat"], token_res, tasks, task_data)
 
     def get_feature_numel(self, _image=None):
         return self._feature_numel

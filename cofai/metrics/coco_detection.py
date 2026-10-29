@@ -9,9 +9,10 @@ from typing import Any, Dict, List
 class CocoDetectionMeter:
     """Accumulate COCO-format detections and report bbox AP on a fixed json."""
 
-    def __init__(self, ann_file: str, score_thr: float = 0.001):
+    def __init__(self, ann_file: str, score_thr: float = 0.001, max_dets=None):
         self.ann_file = str(ann_file)
         self.score_thr = float(score_thr)
+        self.max_dets = list(max_dets) if max_dets is not None else None
         self.results: List[Dict[str, Any]] = []
         self.image_ids: set[int] = set()
         if not Path(self.ann_file).is_file():
@@ -56,6 +57,8 @@ class CocoDetectionMeter:
             coco_dt = coco_gt.loadRes(tmp_path)
             coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
             coco_eval.params.imgIds = sorted(self.image_ids)
+            if self.max_dets is not None:
+                coco_eval.params.maxDets = self.max_dets
             coco_eval.evaluate()
             coco_eval.accumulate()
             coco_eval.summarize()

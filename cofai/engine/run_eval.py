@@ -337,6 +337,12 @@ def eval_step(
         record0.update(task_data["vqa"])
         record0["prediction"] = pred["vqa"]
 
+    text_predictions = {
+        label: value for label, value in pred.items() if isinstance(value, str)
+    }
+    if text_predictions:
+        record0["task_predictions"] = text_predictions
+
     return StepOutput(
         timing=time_items,
         bits=bits_items,

@@ -1,45 +1,8 @@
 # @package _global_
 defaults:
   - /plan/mmstar__qwen3vl-8b-ins-slot9__Bypass__vqa
+  - _dsvfc-slot9
   - _self_
 
 name: mmstar__qwen3vl-8b-ins-slot9__DSVFC__vqa
 description: "AI M2482 DS-VFC; Qwen3-VL-8B-Instruct slot9; MMStar; proposal loss_1 checkpoints"
-
-model:
-  qwen_codec:
-    type: DSVFC
-    h_dim: 1152
-    y_dim: 256
-    z_dim: 192
-    groups: 16
-    spatial_merge_size: 2
-
-# Author checkpoints contain qwen_codec.* and optimizer/RNG state. The existing
-# engine loads the codec parameters into the pretrained CTC model unchanged.
-load:
-  path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.4-epoch016.pth
-  strict: false
-  weights_only: false
-
-args:
-  real: true
-  multi_run: false
-
-# These are five independent checkpoints, not QP anchors of a VBR model.
-multi_run:
-  q06_e12:
-    load:
-      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.6-epoch012.pth
-  q06_e16:
-    load:
-      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.6-epoch016.pth
-  q04_e16:
-    load:
-      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.4-epoch016.pth
-  q02_e16:
-    load:
-      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch016.pth
-  q02_e28:
-    load:
-      path: ${PROJECT_ROOT}/weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch028.pth

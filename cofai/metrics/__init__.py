@@ -13,6 +13,7 @@ from .depth_estimation import (
 )
 from .scene_classification import SceneClassificationMeter
 from .coco_detection import CocoDetectionMeter
+from .odinw13 import ODinWDetectionMeter
 from .iqa_metrics import (
     create_img_metrics,
     create_dist_metrics,
@@ -40,4 +41,5 @@ __all__ = [
     "Dinov3DepthEstimationMeter",
     "SceneClassificationMeter",
     "CocoDetectionMeter",
+    "ODinWDetectionMeter",
 ]

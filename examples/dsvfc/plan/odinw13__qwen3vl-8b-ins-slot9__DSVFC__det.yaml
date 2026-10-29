@@ -1,0 +1,8 @@
+# @package _global_
+defaults:
+  - odinw13__qwen3vl-8b-ins-slot9__Bypass__det
+  - _dsvfc-slot9
+  - _self_
+
+name: odinw13__qwen3vl-8b-ins-slot9__DSVFC__det
+description: "AI M2482 DS-VFC; Qwen3-VL-8B-Instruct slot9; ODinW-13; shared loss_1 checkpoints"

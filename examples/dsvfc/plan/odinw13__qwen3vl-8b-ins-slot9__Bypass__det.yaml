@@ -1,0 +1,43 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: odinw13__qwen3vl-8b-ins-slot9__Bypass__det
+description: "ODinW-13 generated-box detection; Qwen3-VL-8B-Instruct slot9 Bypass"
+
+dataset:
+  type: ODinW13Dataset
+  data_dir: ${PROJECT_ROOT}/data/ODinW-13
+  config_filename: odinw13_config.py
+  min_pixels: 786432
+  max_pixels: 13107200
+
+task_configs:
+  - label: det
+    kind: det
+    meter:
+      type: ODinWDetectionMeter
+      coord_mode: rel
+      proposal_nums: [100, 300, 1000]
+
+model:
+  type: Qwen3vlFeatureCodecModel
+  qwen_backbone:
+    type: cofai.backbone.Qwen3VLBackbone
+    model_path: Qwen/Qwen3-VL-8B-Instruct
+    dtype: bfloat16
+    min_pixels: ${dataset.min_pixels}
+    max_pixels: ${dataset.max_pixels}
+    max_new_tokens: 2048
+    do_sample: false
+    slot: 9
+    attn_implementation: sdpa
+  qwen_codec:
+    type: cofai.latent_codecs.BypassLatentCodec
+
+args:
+  real: false
+  multi_run: false
+  output_dir: ${PROJECT_ROOT}/logs

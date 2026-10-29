@@ -4,7 +4,7 @@ DS-VFC (DeepStack-aware Visual Feature Codec) compresses the Qwen3-VL-8B-Instruc
 
 Source: **AI M2482: 2026年8月, “Qwen3-VL 视觉塔中间层特征编码方法”**, revision `AI M2482_v2.docx`, submitted by Shanghai Jiao Tong University and Ant Group. This integration retains the proposal's `loss_1` checkpoints. The author's later `loss_2` training variant is outside this example.
 
-The implementation reuses CoFAI's existing `Qwen3VLBackbone`, `Qwen3vlFeatureCodecModel`, MMStar dataset/metric, checkpoint loader, and evaluation engine. `cofai/latent_codecs/dsvfc.py` exposes the standard `(1,H*W,C)` / `(H,W)` codec interface and preserves the checkpoint parameter names. It emits the engine's standard per-unit `y`/`z` streams; batch size 1 is required.
+The implementation reuses CoFAI's existing `Qwen3VLBackbone`, `Qwen3vlFeatureCodecModel`, checkpoint loader, and evaluation engine. MMStar and ODinW-13 use the same DS-VFC codec and checkpoints. `cofai/latent_codecs/dsvfc.py` exposes the standard `(1,H*W,C)` / `(H,W)` codec interface and preserves the checkpoint parameter names. It emits the engine's standard per-unit `y`/`z` streams; batch size 1 is required.
 
 ## Resources
 
@@ -47,4 +47,24 @@ Results follow the standard `logs/<plan-name>/result.json` layout; multi-run wri
 poetry run cofai-eval conf/plan/mmstar__qwen3vl-8b-ins-slot9__Bypass__vqa.yaml
 ```
 
-The proposal used likelihood-estimated rates; the default plan measures actual entropy payloads. This example uses CoFAI's existing CTC backbone and attention path, which differs from the proposal's SDPA/Transformers 4.x inference environment.
+The proposal used likelihood-estimated rates; the default plan measures actual entropy payloads. MMStar keeps CoFAI's existing CTC backbone and attention path, which differs from the proposal's SDPA/Transformers 4.x inference environment.
+
+## ODinW-13 detection
+
+Download the complete dataset ZIP, then extract it under the resource root. Export `PROJECT_ROOT` in your shell to the same resource directory used by the plans:
+
+```bash
+poetry run cofai-download examples/dsvfc/odinw13.manifest.txt
+unzip -n "${PROJECT_ROOT}/data/ODinW-13.zip" -d "${PROJECT_ROOT}/data"
+```
+
+The archive creates `${PROJECT_ROOT}/data/ODinW-13/`, including all 13 source sub-datasets, their original splits, and `odinw13_config.py`. The plans evaluate all 4938 validation images. They reuse the five codec files listed above; no task-specific codec or detection-head weights are needed.
+
+```bash
+poetry run cofai-eval examples/dsvfc/plan/odinw13__qwen3vl-8b-ins-slot9__Bypass__det.yaml
+poetry run cofai-eval examples/dsvfc/plan/odinw13__qwen3vl-8b-ins-slot9__DSVFC__det.yaml
+```
+
+The default DS-VFC checkpoint is Q0.4 epoch16 for both tasks. `_dsvfc-slot9.yaml` defines their shared codec, load path, and five-checkpoint `args.multi_run=true` sweep. `Q` remains a training coefficient rather than an inference QP.
+
+Detection retains the author's prompt, 768–12800 visual-token budget, 2048-token generation limit, greedy decoding, and SDPA attention. MMStar keeps its existing CTC attention setting. Generated boxes use normalized 0–1000 coordinates; the metric maps them to original-image pixels and averages COCO mAP across the 13 sub-datasets, with the proposal's `maxDets=[100,300,1000]` and per-subset rounding. Results include per-subset metrics and generated text for cross-checking.

@@ -1,0 +1,3 @@
+# Complete ODinW-13 release, including all source splits and odinw13_config.py.
+# Extract into ${PROJECT_ROOT}/data/ to create data/ODinW-13/.
+data/ODinW-13.zip  sha256:3acedd20

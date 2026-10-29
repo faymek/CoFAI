@@ -85,6 +85,8 @@ class Qwen3VLBackbone(nn.Module):
                           Defaults to the first deepstack feature (slot 9, after
                           layer 8), the latest valid breakpoint. A smaller slot is
                           allowed; a larger one is rejected.
+        attn_implementation (str): Transformers attention backend. Defaults to
+                          ``eager`` for the established MMStar CTC reference.
     """
 
     def __init__(
@@ -99,6 +101,7 @@ class Qwen3VLBackbone(nn.Module):
         max_new_tokens: int = 256,
         do_sample: bool = False,
         slot: Optional[int] = None,
+        attn_implementation: str = "eager",
     ):
         super().__init__()
         self.device = device
@@ -111,7 +114,7 @@ class Qwen3VLBackbone(nn.Module):
             dtype=dtype,
             device_map=device,
             local_files_only=local_files_only,
-            attn_implementation="eager",
+            attn_implementation=attn_implementation,
         )
         self.processor = AutoProcessor.from_pretrained(
             model_path,
