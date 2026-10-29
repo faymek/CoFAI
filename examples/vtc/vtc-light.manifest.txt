@@ -1,0 +1,6 @@
+# AI M2483 VTC-light single-rate QP0 checkpoints (cofai-download).
+# Paths are relative to PROJECT_ROOT.
+# URLs default to https://medialab.sjtu.edu.cn/files/CoFAI-share/<path>.
+
+weights/VTC/dinov3-vitl16-slot24--VTC-light.pth.tar  sha256:27515f5c
+weights/VTC/dinov3-vitl16-slot24--VTC-light-finetuned.pth.tar  sha256:5ae19bc6

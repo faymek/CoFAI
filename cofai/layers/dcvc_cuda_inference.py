@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 CUSTOMIZED_CUDA_INFERENCE = False
 try:
-    from .extensions.inference.inference_extensions_cuda import (
+    from inference_extensions_cuda import (
         process_with_mask_cuda,
         combine_for_reading_2x_cuda,
         restore_y_2x_cuda,

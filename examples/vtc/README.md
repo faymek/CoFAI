@@ -1,11 +1,12 @@
 # VTC 评估代码
 
-这个评估系统提供了完整的Visual Token Codec(VTC)模型评估功能，包含两个提案
+这个评估系统提供了完整的Visual Token Codec(VTC)模型评估功能，包含以下提案
 
 - AI M2418：Visual Token Codec 双路径 token 编码
     - VTC on DINOv2-reg4
 - AI M2448：基于DINOv3的特征编码器
     - VTC on DINOv3
+- AI M2483：DINOv3 特征低复杂度编码方法（VTC-light）
 
 ## 下载数据与权重
 
@@ -47,6 +48,35 @@ CoFAI/
 ├─ weights/                               # 预训练权重
 │   ├─ dinov3/
 │   └─ VTC/
+```
+
+## VTC-light (AI M2483)
+
+Download both single-rate QP0 checkpoints with SHA256 verification:
+
+```bash
+poetry run cofai-download examples/vtc/vtc-light.manifest.txt
+```
+
+Both checkpoints contain only codec parameters and are saved under `$PROJECT_ROOT/weights/VTC/`:
+
+| Version | Filename | SHA256 prefix |
+| --- | --- | --- |
+| M2483 Table 2 | `dinov3-vitl16-slot24--VTC-light.pth.tar` | `27515f5c` |
+| Finetuned for one additional epoch | `dinov3-vitl16-slot24--VTC-light-finetuned.pth.tar` | `5ae19bc6` |
+
+The Table 2 checkpoint preserves the original tensor values, with `pre_dcb_block` / `post_dcb_block` renamed to `pre_blocks` / `post_blocks` for `VTCLight`. The plan uses DINOv3 ViT-L/16 slot24 features and the ADE20K segmentation head. Prepare the shared resources using the [DINOv3 CTC guide](../ctc/README-DINOv3.md).
+
+Evaluate the finetuned checkpoint (default):
+
+```bash
+poetry run cofai-eval examples/vtc/plan/ade20k-val--vtc-light.yaml
+```
+
+Evaluate the Table 2 checkpoint:
+
+```bash
+poetry run cofai-eval examples/vtc/plan/ade20k-val--vtc-light.yaml load.path='${PROJECT_ROOT}/weights/VTC/dinov3-vitl16-slot24--VTC-light.pth.tar'
 ```
 
 ## Plan 测试方法
