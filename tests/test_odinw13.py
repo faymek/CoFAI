@@ -4,15 +4,18 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from hydra import compose, initialize_config_dir
 from PIL import Image
 from torch import nn
+from transformers import Qwen2VLImageProcessor
 
+from cofai.backbone.qwen3vl import Qwen3VLBackbone
 from cofai.datasets.odinw13 import ODinW13Dataset
+from cofai.engine.dataloader import collate_fn
 from cofai.engine.run_eval import eval_step
-from cofai.engine.schema import EvalBatch
 from cofai.metrics.odinw13 import ODinWDetectionMeter, parse_bbox_answer
 from cofai.models import base as model_base
 
@@ -64,7 +67,8 @@ ANSWER = '[{"bbox_2d": [100, 100, 300, 300], "label": "OBJECT"}]'
 
 def test_local_ids_and_missed_images_are_scored_per_dataset(dataset):
     assert dataset.per_dataset_counts == {"alpha": 2, "beta": 1}
-    assert dataset[0]["img"].shape == (3, 100, 100)
+    assert dataset[0]["img"].shape == (100, 100, 3)
+    assert dataset[0]["img"].dtype == np.uint8
     assert dataset[0]["det"]["image_id"] == dataset[2]["det"]["image_id"] == 1
     meter = ODinWDetectionMeter()
     for index in range(len(dataset)):
@@ -82,6 +86,43 @@ def test_absolute_coordinates_and_unknown_labels(dataset):
     answer = '[{"bbox_2d": [20, 30, 60, 90], "label": "object"}, {"bbox_2d": [0, 0, 99, 99], "label": "unknown"}]'
     meter.update(answer, target)
     assert meter.compute()["mAP"] == pytest.approx(1.0)
+
+
+def test_same_score_boxes_retain_exact_label_group_order(dataset):
+    # The author's grouping places both OBJECT false positives ahead of object.
+    # Keeping answer order instead would change AP from 0.333 to 0.500.
+    answer = json.dumps(
+        [
+            {"bbox_2d": [500, 500, 600, 600], "label": "OBJECT"},
+            {"bbox_2d": [100, 100, 300, 300], "label": "object"},
+            {"bbox_2d": [700, 700, 800, 800], "label": "OBJECT"},
+        ]
+    )
+    meter = ODinWDetectionMeter()
+    meter.update(answer, dataset[2]["det"])
+    assert meter.compute()["mAP"] == pytest.approx(0.333)
+
+
+def test_collated_pixels_match_native_qwen_preprocessing(dataset):
+    path = dataset.items[0]["img_path"]
+    pixels = np.arange(100 * 100 * 3, dtype=np.uint8).reshape(100, 100, 3)
+    image = Image.fromarray(pixels)
+    image.save(path)
+    processor = Qwen2VLImageProcessor(
+        patch_size=16,
+        temporal_patch_size=2,
+        merge_size=2,
+        image_mean=[0.5] * 3,
+        image_std=[0.5] * 3,
+    )
+    backbone = SimpleNamespace(processor=SimpleNamespace(image_processor=processor))
+    batch = collate_fn([dataset[0]])
+    actual_pixels, actual_grid = Qwen3VLBackbone.prepare_image(
+        backbone, batch.inputs["img"]
+    )
+    expected = processor(images=image, return_tensors="pt")
+    torch.testing.assert_close(actual_pixels, expected["pixel_values"], rtol=0, atol=0)
+    torch.testing.assert_close(actual_grid, expected["image_grid_thw"], rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("answer", [None, "broken json", '[{"bbox_2d": [1,2,3]}]'])
@@ -132,9 +173,7 @@ def test_vqa_and_detection_use_the_same_codec_in_both_paths(model, dataset):
 
 
 def test_engine_records_generated_boxes(model, dataset):
-    batch = EvalBatch(
-        inputs={"img": dataset[0]["img"].unsqueeze(0)}, samples=[dataset[0]]
-    )
+    batch = collate_fn([dataset[0]])
     context = {
         "cfg": SimpleNamespace(
             args=SimpleNamespace(quality=0, real=True, profile=False)

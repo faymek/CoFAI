@@ -2,6 +2,7 @@
 
 import ast
 import json
+from collections import defaultdict
 from typing import ClassVar
 
 import numpy as np
@@ -73,18 +74,24 @@ class ODinWDetectionMeter:
             boxes = boxes / np.array([resized_w, resized_h, resized_w, resized_h])
             boxes = boxes * np.array([width, height, width, height])
         classes = [str(label).lower() for label in target["classes"]]
-        detections = []
+        grouped = defaultdict(list)
         for box, label in zip(boxes.tolist(), labels):
+            grouped[label].append(box)
+        detections = []
+        # All scores are equal, so retain the author's exact-label group order
+        # before resolving case-insensitive category names.
+        for label, label_boxes in grouped.items():
             label = str(label).lower()
             if label not in classes:
                 continue
-            detections.append(
-                {
-                    "category_id": self._category_ids[name][classes.index(label)],
-                    "bbox": [box[0], box[1], box[2] - box[0], box[3] - box[1]],
-                    "score": 1.0,
-                }
-            )
+            for box in label_boxes:
+                detections.append(
+                    {
+                        "category_id": self._category_ids[name][classes.index(label)],
+                        "bbox": [box[0], box[1], box[2] - box[0], box[3] - box[1]],
+                        "score": 1.0,
+                    }
+                )
         self._meters[name].update(detections, target)
 
     def compute(self):

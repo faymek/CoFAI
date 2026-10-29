@@ -1,5 +1,5 @@
 # AI M2482 DS-VFC proposal (loss_1) checkpoints, unchanged author files.
-# Destinations match the MMStar evaluation plan. No extraction is needed.
+# Destinations match the shared MMStar and ODinW-13 plans. No extraction is needed.
 weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch016.pth  sha256:048dd7be
 weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.2-epoch028.pth  sha256:ca35b9ae
 weights/DS-VFC/loss_1/DS-VFC-qwen3vl-8b-ins-slot9-Q0.4-epoch016.pth  sha256:96189ac7

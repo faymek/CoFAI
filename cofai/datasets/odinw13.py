@@ -5,9 +5,9 @@ import math
 import runpy
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
-from torchvision.transforms.functional import to_tensor
 
 
 def _resized_size(height, width, min_pixels, max_pixels, factor=32):
@@ -33,7 +33,7 @@ def _resized_size(height, width, min_pixels, max_pixels, factor=32):
 class ODinW13Dataset(Dataset):
     """Load all validation images from the bundled ``odinw13_config.py``.
 
-    Images retain their original pixels; the Qwen processor performs resizing.
+    Images use HWC uint8 RGB, as in MMStar; the Qwen processor rescales and resizes.
     ``det`` contains the prompt and original geometry, using the common
     detection ``image_id`` and ``orig_size`` fields. Image IDs are local to
     each named sub-dataset, so metrics must group by ``dataset_name``.
@@ -102,7 +102,7 @@ class ODinW13Dataset(Dataset):
     def __getitem__(self, index):
         item = self.items[index]
         with Image.open(item["img_path"]) as image:
-            pixels = to_tensor(image.convert("RGB"))
+            pixels = np.array(image.convert("RGB"), dtype=np.uint8)
         return {
             "img": pixels,
             "meta": {
