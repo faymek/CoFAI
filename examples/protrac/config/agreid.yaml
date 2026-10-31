@@ -1,0 +1,21 @@
+task: reid
+device: cuda
+data_root: ${oc.env:PROJECT_ROOT}/data/AG-ReID
+checkpoint: ${oc.env:PROJECT_ROOT}/weights/protrac/agreid/vdt.pth
+stats: ${oc.env:PROJECT_ROOT}/weights/protrac/agreid/stats.pt
+image_size: [256, 128]
+slot: 11
+batch_size: 64
+workers: 4
+severity: 5
+corruptions: [motion_blur, zoom_blur, fog, brightness, pixelate, jpeg_compression]
+protocols: [AG, GA]
+codec:
+  type: cofai.latent_codecs.BypassLatentCodec
+calibration:
+  topm: 4
+  temperature: 0.10
+  rank: 16
+  projection_weight: -1.0
+  clip: 0.60
+output: ${oc.env:PROJECT_ROOT}/logs/protrac/reid

@@ -30,10 +30,10 @@ from cofai.metrics.utils import DictAverageMeter
 from cofai.engine.dataloader import build_dataloader
 from cofai.engine.evaluator import MultiTaskEvaluator
 from cofai.engine.runtime import suppress_unnecessary_runtime_output
+from cofai.engine.outputs import write_eval_outputs
 from cofai.engine.schema import (
     EvalBatch,
     StepOutput,
-    EvalResultPayload,
     _validate_step_output_soft,
 )
 
@@ -373,38 +373,6 @@ def eval_loop(
             if max_samples and max_samples > 0 and seen_samples >= max_samples:
                 break
     return records
-
-
-def write_eval_outputs(
-    output_dir: str,
-    *,
-    name: str,
-    description: str,
-    results: Dict[str, Any],
-    quality: Optional[str] = None,
-    records: Optional[List[Dict[str, Any]]] = None,
-    cfg: Any | None = None,
-) -> str:
-    """Write `result.json` and return its path."""
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    payload: EvalResultPayload = {
-        "name": name,
-        "description": description,
-        "results": results,
-        "quality": quality,
-        "records": records or [],
-    }
-    canonical_path = os.path.join(output_dir, "result.json")
-    with open(canonical_path, "w", encoding="utf-8") as file_obj:
-        json.dump(payload, file_obj, indent=2, ensure_ascii=False)
-
-    if cfg is not None:
-        with open(os.path.join(output_dir, "config.yaml"), "w", encoding="utf-8") as f:
-            f.write(OmegaConf.to_yaml(cfg, resolve=True))
-
-    return canonical_path
 
 
 def measure_codec_complexity(

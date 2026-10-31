@@ -75,8 +75,11 @@ compressai = "^1.2.8"
 torchac = "^0.9.3"
 lpips = "^0.1.4"
 dotenv = "^0.9.9"
-setuptools = ">=65.0"
+setuptools = ">=65.0,<82"
 pycocotools = "^2.0.8"
+imagecorruptions = "1.1.2"
+numpy = "^1.26.4"
+scikit-image = ">=0.25,<0.27"
 
 
 [tool.poetry.group.docs]
@@ -85,6 +88,7 @@ optional = true
 [tool.poetry.group.docs.dependencies]
 zensical = "0.0.67"
 mkdocstrings-python = "2.0.9"
+pymdown-extensions = "<12.2"
 
 [[tool.poetry.source]]
 name = "pytorch-cu124"

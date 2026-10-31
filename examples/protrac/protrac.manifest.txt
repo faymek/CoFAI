@@ -1,0 +1,13 @@
+# M2474 ProTRAC evaluation data, backbone weights, and source statistics.
+# Dataset ZIPs are extracted into ${PROJECT_ROOT}/data/.
+data/ADE20K-C.zip  sha256:a436af71
+data/ADE20K.zip  sha256:95253fe4
+data/AG-ReID-C.zip  sha256:340ad4b9
+data/AG-ReID.zip  sha256:397f3c60
+weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors  sha256:45172f20
+weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth  sha256:98cd2ec1
+weights/protrac/ade20k/class_stats.pt  sha256:b7e10b5d
+weights/protrac/ade20k/global_stats.pt  sha256:5ccbf0c0
+weights/protrac/ade20k/region_stats.pt  sha256:96eb6a34
+weights/protrac/agreid/stats.pt  sha256:3bbe3c00
+weights/protrac/agreid/vdt.pth  sha256:34f92069

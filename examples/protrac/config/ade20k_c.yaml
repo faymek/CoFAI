@@ -1,0 +1,39 @@
+task: semseg
+device: cuda
+data_root: ${oc.env:PROJECT_ROOT}/data/ADEChallengeData2016
+corruption_root: ${oc.env:PROJECT_ROOT}/data/ADE20K_val-c
+backbone: ${oc.env:PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+head: ${oc.env:PROJECT_ROOT}/weights/dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth
+stats:
+  global_stats: ${oc.env:PROJECT_ROOT}/weights/protrac/ade20k/global_stats.pt
+  class_stats: ${oc.env:PROJECT_ROOT}/weights/protrac/ade20k/class_stats.pt
+  region_stats: ${oc.env:PROJECT_ROOT}/weights/protrac/ade20k/region_stats.pt
+slot: 23
+severity: 5
+corruptions: [gaussian_noise, shot_noise, impulse_noise, defocus_blur, glass_blur, motion_blur, zoom_blur, snow, frost, fog, brightness, contrast, elastic_transform, pixelate, jpeg_compression]
+codec:
+  type: cofai.latent_codecs.BypassLatentCodec
+calibration:
+  global_topm: 2
+  global_temperature: 0.05
+  global_scale: 1.25
+  global_clip: 0.60
+  class_topk: 2
+  prototype_weight: 0.25
+  prototype_temperature: 0.10
+  min_confidence: 0.50
+  class_scale: 0.75
+  class_clip: 0.20
+  class_prior: 8
+  region_topm: 2
+  region_temperature: 0.05
+  region_scale: 0.50
+  region_clip: 0.20
+  region_prior: 4
+  projection_scale: 0.10
+  projection_clip: 0.10
+  moment_scale: 0.35
+  moment_clip: 0.30
+  moment_prior: 8
+  min_update_mass: 4
+output: ${oc.env:PROJECT_ROOT}/logs/protrac/semseg

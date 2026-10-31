@@ -16,9 +16,11 @@ from .transformers import (
 from .dinov2_org import Dinov2OrgBackbone
 from .vgg import VGGBackbone, setup_vgg_feature_extractor, extract_vgg_features
 from .qwen3vl import Qwen3VLBackbone
+from .vdt import VDTBackbone
 
 __all__ = [
     "BackboneProtocol",
+    "VDTBackbone",
     "FrozenTail",
     "Dinov3FrozenTail",
     "GPSTransReIDBackbone",
