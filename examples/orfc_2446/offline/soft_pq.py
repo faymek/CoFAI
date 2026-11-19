@@ -136,7 +136,7 @@ class SoftPQ(nn.Module):
       Standard hard argmin PQ.
     """
 
-    def __init__(self, G, K, d, lmbda=0.0, prior_floor=0.0):
+    def __init__(self, G, K, d, lmbda=0.0, prior_floor=0.0, shared=False):
         super().__init__()
         self.G = G
         self.K = K
@@ -146,8 +146,12 @@ class SoftPQ(nn.Module):
         self.use_rate = lmbda > 0
         self.prior_floor = prior_floor
         self.temperature = 0.0
+        self.shared = bool(shared)
 
-        self.codebooks = nn.Parameter(torch.randn(G, K, d) * 0.01)
+        if self.shared:
+            self.codebooks = nn.Parameter(torch.randn(K, d) * 0.01)
+        else:
+            self.codebooks = nn.Parameter(torch.randn(G, K, d) * 0.01)
         self._last_rate = None
         self._last_rate_per_group = None
         self._last_labels = None
@@ -170,10 +174,14 @@ class SoftPQ(nn.Module):
         torch.cuda.empty_cache()
 
     def init_codebooks(self, codebooks_list):
-        """Warm-start codebooks from a list of [K, d] numpy arrays."""
+        """Warm-start codebooks from a list of [K, d] numpy arrays or a single [K, d] array."""
         with torch.no_grad():
-            for g, c_g in enumerate(codebooks_list):
-                self.codebooks.data[g] = torch.from_numpy(c_g).float()
+            if self.shared:
+                arr = codebooks_list[0] if isinstance(codebooks_list, (list, tuple)) else codebooks_list
+                self.codebooks.data.copy_(torch.from_numpy(np.asarray(arr)).float())
+            else:
+                for g, c_g in enumerate(codebooks_list):
+                    self.codebooks.data[g] = torch.from_numpy(c_g).float()
 
     def init_prior_from_freq(self, usage_counts, smoothing=1.0):
         """Initialise log_prior from empirical assignment frequency."""
@@ -190,7 +198,10 @@ class SoftPQ(nn.Module):
     def _quantise(self, Z_flat):
         """ECVQ assignment with optional soft straight-through gradient."""
         N = Z_flat.shape[0]
-        C = self.codebooks
+        if self.shared:
+            C = self.codebooks.unsqueeze(0).expand(self.G, -1, -1)
+        else:
+            C = self.codebooks
         sub_g = Z_flat.reshape(N, self.G, self.d).permute(1, 0, 2)  # [G, N, d]
 
         dists_sq = torch.cdist(sub_g, C).pow(2)  # [G, N, K]
@@ -283,6 +294,8 @@ class FeatureCodec(nn.Module):
             Z = self.transform.encode(flat) if self.transform else flat
             Z_hat, usage = self.pq._quantise(Z)
             Y_hat = self.transform.decode(Z_hat) if self.transform else Z_hat
+        self._last_z = Z
+        self._last_z_hat = Z_hat
         return Y_hat.reshape(B, T, D), usage
 
     @property
