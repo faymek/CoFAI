@@ -1,0 +1,62 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: nyuv2-val__dinov3-vitl16-slot24__PQFCv2-stage2__depth
+description: "Data: NYUv2 test; Model: DINOv3 ViT-L/16 slot24; Codec: PQFCv2 stage-2 frozen-stage-1 baseline; Task: depth estimation"
+args:
+  real: true
+dataset:
+  type: NYUDepthDataset
+  root: ${PROJECT_ROOT}/data/NYU
+  split_file: nyu_test.txt
+test_transforms:
+  - type: cofai.transforms.PadToMultiple
+    multiple: 16
+    keys: [img]
+  - type: cofai.transforms.ToTensor
+    keys: [img]
+collate:
+  mode: stack_only
+task_configs:
+  - label: depth
+    meter:
+      type: Dinov3DepthEstimationMeter
+      names: [rmse, abs_rel, a1]
+      min_depth: 0.001
+      max_depth: 10.0
+      ignored_value: 0.0
+      eval_mask: NYU_EIGEN
+      normalization_constant: 1000.0
+model:
+  type: DinoFeatureCodecModel
+  dino_backbone:
+    type: cofai.backbone.Dinov3TimmBackbone
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: 24
+    n_last_blocks: 1
+    cast_dtype: float16
+    pretrained: false
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors
+  dino_codec:
+    type: examples.pqfcv2.stage2_model.Pqfcv2Stage2Codec
+    stage1_path: ${PROJECT_ROOT}/weights/pqfcv2/dinov3/stage1_K2048_e8_postln_l100_splitlr/stage1_K2048_e8.npz
+    checkpoint_path: ???
+  heads:
+    depth:
+      type: Dinov3DepthHead
+      in_channels: [1024]
+      min_depth: 0.001
+      max_depth: 10.0
+      n_output_channels: 256
+      use_backbone_norm: true
+      use_batchnorm: true
+      use_cls_token: false
+      bins_strategy: linear
+      norm_strategy: linear
+      checkpoint: ${PROJECT_ROOT}/weights/dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth
