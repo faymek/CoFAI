@@ -194,3 +194,7 @@ pyrightconfig.json
 # VQ-UFC generated RMS artifacts and checkpoints stay outside source control.
 examples/vq_ufc/**/*.npz
 examples/vq_ufc/**/*.pth.tar
+# PQFCv2 generated features, RMS/OPQ artifacts, and checkpoints stay outside source control.
+examples/pqfcv2/**/*.npy
+examples/pqfcv2/**/*.npz
+examples/pqfcv2/**/*.pt

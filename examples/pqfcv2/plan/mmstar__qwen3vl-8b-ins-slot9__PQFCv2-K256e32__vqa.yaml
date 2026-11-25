@@ -1,0 +1,40 @@
+# @package _global_
+defaults:
+  - /args: default
+  - /dataloader: default
+  - _self_
+
+name: mmstar__qwen3vl-8b-ins-slot9__PQFCv2-K256e32__vqa
+description: "data: MMStar; model: Qwen3vlFeatureCodecModel + PQFCv2 K256 e32 slot9; task: multiple-choice accuracy"
+
+dataset:
+  type: MMStarDataset
+  data_path: ${PROJECT_ROOT}/data/MMStar.tsv
+  prompt_suffix: "Please select the correct answer from the options above.\nYou MUST reply with one single letter (A/B/C/D) with no explanation."
+
+task_configs:
+  - label: vqa
+    kind: vqa
+    meter:
+      type: MMStarAccuracyMetric
+
+model:
+  type: Qwen3vlFeatureCodecModel
+  qwen_backbone:
+    type: cofai.backbone.Qwen3VLBackbone
+    model_path: Qwen/Qwen3-VL-8B-Instruct
+    dtype: bfloat16
+    min_pixels: 602112
+    max_pixels: 1204224
+    max_new_tokens: 512
+    do_sample: false
+    slot: 9
+  qwen_codec:
+    type: examples.pqfcv2.codec.PqfCv2OpqCodec
+    opq_path: ${PROJECT_ROOT}/weights/pqfcv2/qwen3vl/stage1_K256_e32_postln_l3_lr3e-4_slot9/stage1_K256_e32.npz
+    rms_path: ${PROJECT_ROOT}/weights/pqfcv2/qwen3vl/patch_channel_rms_s42_slot9.npz
+
+args:
+  real: true
+  verbose: false
+  output_dir: ${PROJECT_ROOT}/logs/pqfcv2/mmstar_slot9

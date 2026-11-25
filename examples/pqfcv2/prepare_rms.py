@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-prefix-tokens", type=int, default=5)
     parser.add_argument("--eps", type=float, default=1e-6)
+    parser.add_argument(
+        "--patch-only",
+        action="store_true",
+        help="Save one shared patch-channel RMS and no prefix group.",
+    )
     return parser.parse_args()
 
 
@@ -77,10 +82,14 @@ def main() -> None:
     order = np.random.RandomState(args.seed).permutation(len(features))
     val_files = [features[int(index)] for index in order[: args.n_val]]
     train_files = [features[int(index)] for index in order[args.n_val :]]
+    if args.patch_only and args.num_prefix_tokens != 0:
+        raise ValueError("--patch-only requires --num-prefix-tokens 0")
     prefix_rms, patch_rms = compute_rms(train_files, args.num_prefix_tokens, args.eps)
+    if args.patch_only and prefix_rms.shape[0] != 0:
+        raise RuntimeError(f"patch-only RMS still has a prefix group of shape {prefix_rms.shape}")
     metadata = {
         "format_version": 1,
-        "normalization_mode": "prefix_position_patch_channel_rms",
+        "normalization_mode": "patch_channel_rms" if args.patch_only else "prefix_position_patch_channel_rms",
         "feature_root": str(feature_root),
         "train_files": len(train_files),
         "validation_files": len(val_files),
@@ -88,13 +97,25 @@ def main() -> None:
         "seed": args.seed,
         "n_val": args.n_val,
         "num_prefix_tokens": args.num_prefix_tokens,
-        "prefix_rms_shape": list(prefix_rms.shape),
+        "prefix_rms_shape": None if args.patch_only else list(prefix_rms.shape),
         "patch_rms_shape": list(patch_rms.shape),
         "eps": args.eps,
         "datasets": ["ade_1w", "nyu_1w"],
     }
     output = resolve(args.output, root)
-    save_rms(output, prefix_rms, patch_rms, metadata)
+    if args.patch_only:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            output,
+            patch_channel_rms=patch_rms,
+            metadata_json=np.asarray(json.dumps(metadata, sort_keys=True)),
+        )
+        output.with_suffix(output.suffix + ".json").write_text(
+            json.dumps(metadata, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    else:
+        save_rms(output, prefix_rms, patch_rms, metadata)
     split_path = resolve(args.split_path, root)
     split_path.parent.mkdir(parents=True, exist_ok=True)
     split = {

@@ -121,6 +121,9 @@ class Qwen3VLBackbone(nn.Module):
             trust_remote_code=True,
         )
         self.model.eval()
+        # Avoid torch 2.9+cu128 contiguous bf16 Conv3d slow fallback (~22s -> ~60ms/img; bit-exact cuDNN path).
+        if torch.cuda.is_available() and "cuda" in str(device):
+            self.model.model.visual.patch_embed.proj.to(memory_format=torch.channels_last_3d)
         for param in self.model.parameters():
             param.requires_grad = False
 

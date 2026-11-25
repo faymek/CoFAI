@@ -1,0 +1,39 @@
+# Qwen3-VL-8B vision encoder (SigLIP2), slot 9 (blk08), K=256, e=32, G=36.
+# Tail distortion: Candidate A (visual.blocks[9:27] + visual.merger.norm), native bfloat16, sdpa.
+# Shared OPQ init. batch_size=4, max_batch_tokens=10000 (no grad ckpt, no grad accum).
+
+backbone_type: qwen3vl
+backbone_name: qwen3vl_8b_visual
+layer: blk08
+slot: 9
+embed_dim: 1152
+n_prefix: 0
+K: 256
+embedding_dim: 32
+epochs: 10
+lr: 1.0e-3
+batch_size: 4
+max_batch_tokens: 10000
+n_val: 50
+distortion: post_ln
+lmbda: 1.0
+tau_start: 0.5
+tau_end: 0.005
+tau_schedule: exponential
+grad_clip: 1.0
+prior_floor: 0.0
+kmeans_max_samples: 2000000
+seed: 42
+rms_eps: 1.0e-6
+chunk_tokens: 1024
+tail_dtype: bfloat16
+attn_implementation: sdpa
+
+paths:
+  feature_root: features/pqfcv2/qwen3vl_slot9
+  split_path: features/pqfcv2/qwen3vl_slot9/split.json
+  grids: features/pqfcv2/qwen3vl_slot9/grids.json
+  rms_path: weights/pqfcv2/qwen3vl/patch_channel_rms_s42_slot9.npz
+  output_dir: weights/pqfcv2/qwen3vl/stage1_K256_e32_postln_l1_lr1e-3_slot9
+  opq_init: weights/pqfcv2/qwen3vl/stage1_K256_e32_slot9/opq_init.npz
+  backbone: Qwen/Qwen3-VL-8B-Instruct

@@ -92,8 +92,13 @@ def load_rms(
     num_prefix_tokens: int = 5,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     with np.load(Path(path).expanduser().resolve(), allow_pickle=False) as data:
-        prefix_rms = np.asarray(data["prefix_position_channel_rms"], dtype=np.float32)
         patch_rms = np.asarray(data["patch_channel_rms"], dtype=np.float32)
+        if "prefix_position_channel_rms" in data.files:
+            prefix_rms = np.asarray(data["prefix_position_channel_rms"], dtype=np.float32)
+        elif num_prefix_tokens == 0:
+            prefix_rms = np.zeros((0, patch_rms.size), dtype=np.float32)
+        else:
+            raise KeyError("RMS artifact is missing prefix_position_channel_rms")
         metadata = json.loads(str(data["metadata_json"].item()))
 
     expected = (num_prefix_tokens, patch_rms.size)
@@ -103,6 +108,6 @@ def load_rms(
         raise ValueError(f"Invalid RMS shapes: prefix={prefix_rms.shape}, patch={patch_rms.shape}")
     if not np.isfinite(prefix_rms).all() or not np.isfinite(patch_rms).all():
         raise ValueError("RMS artifact contains non-finite values")
-    if np.any(prefix_rms <= 0) or np.any(patch_rms <= 0):
+    if (prefix_rms.size > 0 and np.any(prefix_rms <= 0)) or np.any(patch_rms <= 0):
         raise ValueError("RMS artifact contains non-positive values")
     return prefix_rms, patch_rms, metadata

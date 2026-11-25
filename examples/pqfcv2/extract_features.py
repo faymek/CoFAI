@@ -13,6 +13,7 @@ import argparse
 import os
 import sys
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -70,13 +72,22 @@ def padded_hw(path: Path, multiple: int) -> tuple[int, int]:
     return height + pad_h, width + pad_w
 
 
-def load_batch(paths: list[Path], pad: PadToMultiple, to_tensor: ToTensor) -> torch.Tensor:
-    tensors = []
-    for path in paths:
-        with Image.open(path) as image:
-            array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-        sample = to_tensor(pad({"img": array}))
-        tensors.append(sample["img"])
+def load_one(path: Path, pad: PadToMultiple, to_tensor: ToTensor) -> torch.Tensor:
+    with Image.open(path) as image:
+        array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    return to_tensor(pad({"img": array}))["img"]
+
+
+def load_batch(
+    paths: list[Path],
+    pad: PadToMultiple,
+    to_tensor: ToTensor,
+    pool: ThreadPoolExecutor | None,
+) -> torch.Tensor:
+    if pool is None or len(paths) == 1:
+        tensors = [load_one(path, pad, to_tensor) for path in paths]
+    else:
+        tensors = list(pool.map(lambda path: load_one(path, pad, to_tensor), paths))
     return torch.stack(tensors, dim=0)
 
 
@@ -105,29 +116,45 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
 
     pending = []
-    skipped = 0
-    for dataset, image_path, feature_path in samples:
-        if args.skip_existing and feature_path.is_file():
-            skipped += 1
-            continue
-        height, width = padded_hw(image_path, args.pad_multiple)
-        pending.append((dataset, image_path, feature_path, height, width))
-
+    workers = max(1, int(args.workers))
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     backbone_path = resolve(args.backbone, root)
-    backbone = Dinov3TimmBackbone(
-        model_size="large",
-        img_size=512,
-        patch_size=16,
-        dynamic_size=True,
-        slot=args.slot,
-        n_last_blocks=1,
-        cast_dtype="float32",
-        pretrained=False,
-        ckpt_path=str(backbone_path),
-        device=str(device),
-    )
-    backbone.to(device).eval()
+
+    def collect_pending() -> tuple[list[tuple], int]:
+        kept = []
+        skipped_count = 0
+        todo = []
+        for dataset, image_path, feature_path in samples:
+            if args.skip_existing and feature_path.is_file():
+                skipped_count += 1
+                continue
+            todo.append((dataset, image_path, feature_path))
+        if workers == 1:
+            sizes = [padded_hw(image_path, args.pad_multiple) for _, image_path, _ in todo]
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                sizes = list(pool.map(lambda item: padded_hw(item[1], args.pad_multiple), todo))
+        for (dataset, image_path, feature_path), (height, width) in zip(todo, sizes):
+            kept.append((dataset, image_path, feature_path, height, width))
+        return kept, skipped_count
+
+    print(f"loading backbone on {device} while sizing images with {workers} workers", flush=True)
+    with ThreadPoolExecutor(max_workers=1) as scan_pool:
+        pending_future = scan_pool.submit(collect_pending)
+        backbone = Dinov3TimmBackbone(
+            model_size="large",
+            img_size=512,
+            patch_size=16,
+            dynamic_size=True,
+            slot=args.slot,
+            n_last_blocks=1,
+            cast_dtype="float32",
+            pretrained=False,
+            ckpt_path=str(backbone_path),
+            device=str(device),
+        )
+        backbone.to(device).eval()
+        pending, skipped = pending_future.result()
     prefix_tokens = int(backbone.model.num_prefix_tokens)
     if prefix_tokens != 5 or int(backbone.model.embed_dim) != 1024:
         raise RuntimeError(
@@ -139,28 +166,47 @@ def main() -> None:
     for _, image_path, feature_path, height, width in pending:
         groups[(height, width)].append((image_path, feature_path))
 
+    batches: list[tuple[int, int, int, list[tuple[Path, Path]]]] = []
+    for (height, width), items in groups.items():
+        tokens = prefix_tokens + (height // 16) * (width // 16)
+        batch_limit = max(1, args.max_batch_tokens // max(tokens, 1))
+        for start in range(0, len(items), batch_limit):
+            batches.append((height, width, tokens, items[start : start + batch_limit]))
+
     print(
-        f"shard {args.shard_index}/{args.num_shards}  pending={len(pending)}  skipped={skipped}  device={device}",
+        f"shard {args.shard_index}/{args.num_shards}  pending={len(pending)}  skipped={skipped}  "
+        f"batches={len(batches)}  workers={workers}  device={device}",
         flush=True,
     )
     saved = 0
-    with torch.inference_mode():
-        for (height, width), items in tqdm(groups.items(), desc=f"gpu{args.shard_index}"):
-            tokens = prefix_tokens + (height // 16) * (width // 16)
-            batch_limit = max(1, args.max_batch_tokens // max(tokens, 1))
-            for start in range(0, len(items), batch_limit):
-                batch = items[start : start + batch_limit]
-                images = load_batch([path for path, _ in batch], pad, to_tensor).to(device)
-                if tuple(images.shape[-2:]) != (height, width):
-                    raise RuntimeError(f"Padded size {tuple(images.shape[-2:])} != {(height, width)}")
-                features = backbone.encode(images).float().cpu().numpy()
-                for index, (_, feature_path) in enumerate(batch):
-                    array = np.asarray(features[index], dtype=np.float32)
-                    if array.shape != (tokens, 1024):
-                        raise RuntimeError(f"{feature_path} has shape {array.shape}, expected {(tokens, 1024)}")
-                    np.save(feature_path, array)
-                    saved += 1
-                del images, features
+    with torch.inference_mode(), ThreadPoolExecutor(max_workers=workers) as pool:
+        next_images = None
+        for index, (height, width, tokens, batch) in enumerate(tqdm(batches, desc=f"gpu{args.shard_index}")):
+            if next_images is None:
+                images = load_batch([path for path, _ in batch], pad, to_tensor, pool).to(device)
+            else:
+                images = next_images.result().to(device)
+            if index + 1 < len(batches):
+                next_batch = batches[index + 1][3]
+                next_images = pool.submit(
+                    load_batch,
+                    [path for path, _ in next_batch],
+                    pad,
+                    to_tensor,
+                    None,
+                )
+            else:
+                next_images = None
+            if tuple(images.shape[-2:]) != (height, width):
+                raise RuntimeError(f"Padded size {tuple(images.shape[-2:])} != {(height, width)}")
+            features = backbone.encode(images).float().cpu().numpy()
+            for feature_index, (_, feature_path) in enumerate(batch):
+                array = np.asarray(features[feature_index], dtype=np.float32)
+                if array.shape != (tokens, 1024):
+                    raise RuntimeError(f"{feature_path} has shape {array.shape}, expected {(tokens, 1024)}")
+                np.save(feature_path, array)
+                saved += 1
+            del images, features
     print(f"shard {args.shard_index} saved={saved} skipped={skipped}", flush=True)
 
 

@@ -4,16 +4,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-/data4/workspace/zlt/featcodec/CoFAI}"
-PYTHON_BIN="${PYTHON_BIN:-$PROJECT_ROOT/.venv/bin/python}"
-export PROJECT_ROOT PYTHONPATH="$SOURCE_ROOT"
-export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+PROJECT_ROOT="${PROJECT_ROOT:-$SOURCE_ROOT}"
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+    PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python"
+  else
+    PYTHON_BIN="python"
+  fi
+fi
+export PROJECT_ROOT PYTHONPATH="$SOURCE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
 FEATURE_ROOT="$PROJECT_ROOT/features/pqfcv2/dinov3"
 LOG_DIR="$PROJECT_ROOT/logs/pqfcv2/extract"
 mkdir -p "$LOG_DIR" "$FEATURE_ROOT/ade" "$FEATURE_ROOT/nyu"
 
-GPUS=(${GPUS:-1 5 6 7})
+GPUS=(${GPUS:-0})
 NUM_SHARDS="${#GPUS[@]}"
 
 COMMON=(

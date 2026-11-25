@@ -28,12 +28,13 @@ def _load_pmf(usage: np.ndarray) -> torch.Tensor:
 
 
 class PqfCv2OpqCodec(nn.Module):
-    """Hard PQ with the OPQ rotation, fixed RMS, and a usage-count prior."""
+    """Hard PQ / ECVQ with the OPQ rotation, fixed RMS, and a static rANS prior."""
 
-    def __init__(self, opq_path: str, rms_path: str):
+    def __init__(self, opq_path: str, rms_path: str, lmbda: float | None = None):
         super().__init__()
         opq_file = Path(opq_path)
         rms_file = Path(rms_path)
+        npz_lmbda: float | None = None
         with np.load(opq_file, allow_pickle=False) as data:
             rotation = np.asarray(data["R"], dtype=np.float32)
             codebooks = np.asarray(data["codebooks"], dtype=np.float32)
@@ -43,9 +44,14 @@ class PqfCv2OpqCodec(nn.Module):
                 probabilities = np.asarray(data["usage"], dtype=np.float64)
             else:
                 raise ValueError(f"PQFCv2 artifact {opq_file} has neither pmf nor usage")
+            if "lmbda" in data.files:
+                npz_lmbda = float(np.asarray(data["lmbda"]).item())
         with np.load(rms_file, allow_pickle=False) as data:
-            prefix_rms = np.asarray(data["prefix_position_channel_rms"], dtype=np.float32)
             patch_rms = np.asarray(data["patch_channel_rms"], dtype=np.float32)
+            if "prefix_position_channel_rms" in data.files:
+                prefix_rms = np.asarray(data["prefix_position_channel_rms"], dtype=np.float32)
+            else:
+                prefix_rms = np.zeros((0, patch_rms.size), dtype=np.float32)
 
         if codebooks.ndim != 3:
             raise ValueError(f"OPQ codebooks must be [groups, entries, dim], got {codebooks.shape}")
@@ -67,11 +73,22 @@ class PqfCv2OpqCodec(nn.Module):
         self.num_groups = int(groups)
         self.embedding_dim = int(embedding_dim)
         self.feat_dim = int(feature_dim)
+        resolved_lmbda = npz_lmbda if lmbda is None else float(lmbda)
+        self.lmbda = None if resolved_lmbda is None or resolved_lmbda <= 0 else float(resolved_lmbda)
         self.register_buffer("R", torch.from_numpy(rotation))
         self.register_buffer("codebooks", torch.from_numpy(codebooks))
         self.register_buffer("prefix_rms", torch.from_numpy(prefix_rms))
         self.register_buffer("patch_rms", torch.from_numpy(patch_rms))
         self.entropy_model = StaticCategoricalEntropyModel(_load_pmf(probabilities))
+        label_total = float((1 << self.entropy_model.range_coder_precision) - 1)
+        rans_bits = np.stack(
+            [
+                -np.log2(np.diff(np.asarray(cdf[:-1], dtype=np.float64)) / label_total)
+                for cdf in self.entropy_model._cdfs
+            ],
+            axis=0,
+        ).astype(np.float32)
+        self.register_buffer("rans_bits", torch.from_numpy(rans_bits))
 
     def _labels(self, tokens: torch.Tensor) -> torch.Tensor:
         batch_size, n_tokens, feature_dim = tokens.shape
@@ -84,8 +101,20 @@ class PqfCv2OpqCodec(nn.Module):
         rotated = flat @ self.R
         sub_vectors = rotated.reshape(batch_size * n_tokens, self.num_groups, self.embedding_dim)
         sub_vectors = sub_vectors.permute(1, 0, 2).contiguous()
-        _reconstructed, labels = batched_assign(sub_vectors, self.codebooks, device=tokens.device)
-        return labels
+        if self.lmbda is None:
+            _reconstructed, labels = batched_assign(sub_vectors, self.codebooks, device=tokens.device)
+            return labels
+        # ECVQ assignment matching SoftPQ: argmin_k (||z - c_k||^2 + R_rANS(k) / lmbda).
+        penalty = (self.rans_bits / self.lmbda).unsqueeze(1)
+        total_tokens = sub_vectors.shape[1]
+        chunk_size = 4096
+        if total_tokens <= chunk_size:
+            return (torch.cdist(sub_vectors, self.codebooks).pow(2) + penalty).argmin(dim=-1)
+        chunks = [
+            (torch.cdist(sub_vectors[:, start : start + chunk_size, :], self.codebooks).pow(2) + penalty).argmin(dim=-1)
+            for start in range(0, total_tokens, chunk_size)
+        ]
+        return torch.cat(chunks, dim=1)
 
     def _tokens_from_labels(self, labels: torch.Tensor, batch_size: int, n_tokens: int) -> torch.Tensor:
         label_index = labels.unsqueeze(-1).expand(self.num_groups, batch_size * n_tokens, self.embedding_dim)
