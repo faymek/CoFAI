@@ -1,0 +1,12 @@
+# Frozen stage-1 PQFCv2, token adapter baseline including all prefix tokens.
+# Paths and N are supplied by the launcher; CLI options override these defaults.
+block_tokens: 241
+epochs: 8
+batch_size: 4
+lr: 0.001
+lmbda: 100.0
+temperature: 0.5
+group_chunk: 8
+n_val: 50
+seed: 42
+device: cuda:0
