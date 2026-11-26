@@ -198,3 +198,15 @@ examples/vq_ufc/**/*.pth.tar
 examples/pqfcv2/**/*.npy
 examples/pqfcv2/**/*.npz
 examples/pqfcv2/**/*.pt
+examples/pqfcv2/**/*.pth
+examples/pqfcv2/**/*.pth.tar
+examples/pqfcv2/**/*.ckpt
+examples/pqfcv2/**/*.safetensors
+examples/pqfcv2/**/*.bin
+examples/pqfcv2/**/*.tar
+examples/pqfcv2/**/*.tar.gz
+examples/pqfcv2/**/*.tar.zst
+examples/pqfcv2/**/features/
+examples/pqfcv2/**/weights/
+examples/pqfcv2/**/checkpoints/
+examples/pqfcv2/**/logs/

@@ -1,0 +1,38 @@
+layer: blk23
+slot: 24
+embed_dim: 1024
+n_prefix: 5
+K: 2048
+embedding_dim: 8
+epochs: 4
+lr: 1.0e-3
+rot_lr: 1.0e-5
+batch_size: 4
+max_batch_tokens: 6000
+microbatch_tokens: 1536
+distortion: post_ln
+lmbda: 100.0
+assignment_lmbda: 100.0
+rate_weight: 1.25
+vector_weight: 0.1
+token_normalized_loss: true
+soft_rate: true
+export_learned_prior: true
+export_each_epoch: true
+tau_start: 0.5
+tau_end: 0.2398
+tau_schedule: exponential
+grad_clip: 1.0
+prior_floor: 0.0
+kmeans_max_samples: 2000000
+seed: 42
+rms_eps: 1.0e-6
+chunk_tokens: 1024
+paths:
+  feature_root: features/pqfcv2/dinov3
+  split_path: features/pqfcv2/dinov3/split.json
+  grids: features/pqfcv2/dinov3/grids.json
+  rms_path: weights/pqfcv2/dinov3/prefix_position_patch_rms_s42.npz
+  output_dir: weights/pqfcv2/dinov3/stage1_K2048_e8_8h_rate125
+  opq_init: weights/pqfcv2/dinov3/stage1_K2048_e8/opq_init.npz
+  backbone: weights/dinov3/backbone/dinov3_vitl16_pretrain_lvd1689m.safetensors

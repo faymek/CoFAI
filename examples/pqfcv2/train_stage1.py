@@ -80,6 +80,16 @@ def load_config(path: Path) -> dict:
     return config
 
 
+def oversample_train_domain(files: list[Path], feature_root: Path, domain: str, fraction: float, seed: int) -> list[Path]:
+    """Repeat a deterministic subset of one training domain, keeping all files."""
+    if not 0 <= fraction <= 1:
+        raise ValueError("domain oversampling fraction must be in [0, 1]")
+    matching = [path for path in files if path.relative_to(feature_root).parts[0] == domain]
+    if not matching:
+        raise ValueError(f"No training files found for domain {domain!r}")
+    return list(files) + random.Random(seed).sample(matching, int(len(matching) * fraction))
+
+
 def apply_rms(
     features: torch.Tensor,
     prefix_rms: torch.Tensor,
@@ -396,6 +406,48 @@ def accumulate_batch(
     return float(distortion.detach()), float(rate_bits.detach()), commit_value, usage.detach()
 
 
+def accumulate_token_normalized_batch(
+    raw, codec, prefix_rms, patch_rms, n_prefix, lmbda, vector_weight,
+    tail, microbatch_tokens, relative_vector=False, rate_weight=1.0,
+):
+    """Backpropagate an equal-image token-normalized loss in bounded token chunks.
+
+    This path is for the final DINO block, whose frozen tail is tokenwise LN.
+    Each chunk contributes its exact fraction of the full image objective.
+    """
+    if tail is None or len(getattr(tail, "blocks", [])):
+        raise ValueError("token microbatching requires a tokenwise final LayerNorm tail")
+    batch, length, _ = raw.shape
+    if microbatch_tokens < batch:
+        raise ValueError("microbatch_tokens must be at least the image batch size")
+    normalized = apply_rms(raw, prefix_rms, patch_rms, n_prefix)
+    step = max(1, microbatch_tokens // batch)
+    usage_total = None
+    distortion_total = rate_total = vector_total = 0.0
+    for start, end in iter_token_chunks(length, step):
+        restored, usage = codec(normalized[:, start:end])
+        decoded = invert_rms(restored, prefix_rms, patch_rms, n_prefix, start)
+        with torch.no_grad():
+            teacher = tail.forward_nograd(raw[:, start:end])
+        student = tail(decoded)
+        distortion = (teacher.float() - student.float()).square().sum()
+        vector_error = (normalized[:, start:end] - restored).square()
+        if relative_vector:
+            # Give each token a comparable vector penalty despite energy variation.
+            energy = normalized[:, start:end].square().mean(dim=-1, keepdim=True).clamp_min(1e-4)
+            vector = (vector_error / energy).sum()
+        else:
+            vector = vector_error.sum()
+        rate_bits = codec._last_rate * ((end - start) * batch)
+        loss = (rate_weight * rate_bits + lmbda * distortion + vector_weight * vector) / (batch * length)
+        loss.backward()
+        distortion_total += float(distortion.detach())
+        vector_total += float(vector.detach())
+        rate_total += float(rate_bits.detach())
+        usage_total = usage.detach() if usage_total is None else usage_total + usage.detach()
+    return distortion_total, rate_total, vector_total, usage_total
+
+
 class _NullTail:
     """No-op tail used when ``--no_transform`` skips backbone loading.
 
@@ -430,6 +482,7 @@ def evaluate(
     count_patch = 0
     count_raw = 0
     count_vector = 0
+    domains: dict[str, dict[str, float]] = {}
     embed_dim = int(patch_rms.numel())
     for path in files:
         raw = load_feature(path, device, embed_dim=embed_dim, n_prefix=n_prefix)
@@ -452,15 +505,26 @@ def evaluate(
         patch = diff[:, n_prefix:]
         sum_patch += float(patch.square().sum())
         count_patch += int(patch.numel())
+        domain = path.parent.name
+        if domain in ("ade", "nyu"):
+            stats = domains.setdefault(domain, {"patch_sum": 0.0, "patch_count": 0, "vector_sum": 0.0, "vector_count": 0})
+            stats["patch_sum"] += float(patch.square().sum())
+            stats["patch_count"] += int(patch.numel())
+            stats["vector_sum"] += float(vector_diff.square().sum())
+            stats["vector_count"] += int(vector_diff.numel())
         raw_diff = raw - decoded
         sum_raw += float(raw_diff.square().sum())
         count_raw += int(raw_diff.numel())
-    return {
+    results = {
         "vector_mse": sum_vector / max(count_vector, 1),
         "post_ln_all_mse": sum_all / max(count_all, 1),
         "post_ln_patch_mse": sum_patch / max(count_patch, 1),
         "raw_mse": sum_raw / max(count_raw, 1),
     }
+    for domain, stats in domains.items():
+        results[f"{domain}_post_ln_patch_mse"] = stats["patch_sum"] / max(stats["patch_count"], 1)
+        results[f"{domain}_vector_mse"] = stats["vector_sum"] / max(stats["vector_count"], 1)
+    return results
 
 
 def histogram_pmf(
@@ -533,6 +597,12 @@ def main() -> None:
         feature_root,
         int(config["n_prefix"]),
     )
+    oversample_domain = config.get("oversample_domain")
+    if oversample_domain is not None:
+        train_files = oversample_train_domain(
+            train_files, feature_root, str(oversample_domain),
+            float(config.get("oversample_fraction", 0.0)), int(config["seed"]),
+        )
     prefix_rms = torch.from_numpy(prefix_np).to(device)
     patch_rms = torch.from_numpy(patch_np).to(device)
 
@@ -590,9 +660,10 @@ def main() -> None:
         groups,
         codebook_size,
         embedding_dim,
-        lmbda=float(config["lmbda"]),
+        lmbda=float(config.get("assignment_lmbda", config["lmbda"])),
         prior_floor=float(config["prior_floor"]),
         shared=bool(config.get("shared_codebook", False)),
+        soft_rate=bool(config.get("soft_rate", False)),
     ).to(device)
     transform = None if args.no_transform else OrthogonalTransform(embed_dim).to(device)
     codec = FeatureCodec(quantizer, transform).to(device)
@@ -717,6 +788,11 @@ def main() -> None:
     epochs = int(config["epochs"])
     batch_size = int(config["batch_size"])
     grids = load_grids(config["paths"]["grids"]) if config["paths"].get("grids") else None
+    if config.get("token_normalized_loss", False):
+        if grids is None or distortion_mode != "post_ln":
+            raise ValueError("token_normalized_loss requires grids and post_ln distortion")
+        if config.get("commit_weight", 0) or config.get("rate_cap_weight", 0):
+            raise ValueError("token_normalized_loss does not support commitment or rate-cap terms")
     tail_dtype_name = str(config.get("tail_dtype", "float32"))
     if tail_dtype_name in ("float32", "fp32"):
         tail_dtype = None
@@ -729,6 +805,28 @@ def main() -> None:
             f"token-count batches size={batch_size} "
             f"max_batch_tokens={config.get('max_batch_tokens')} tail_dtype={tail_dtype_name}"
         )
+
+    def export_training_snapshot(epoch: int, step: int | None = None) -> None:
+        """Keep an immutable, directly evaluable artifact while training continues."""
+        pmf = codec.get_prior_pmf()
+        floor = float(config["prior_floor"])
+        pmf = (1.0 - floor) * pmf + floor / codebook_size
+        name = f"epoch_{epoch:02d}" if step is None else f"epoch_{epoch:02d}_step_{step:05d}"
+        temporary = output_dir / f".{name}.tmp.npz"
+        destination = output_dir / f"{name}.npz"
+        save_codec_npz(
+            codec, temporary, pmf,
+            norm_mode="prefix_position_patch_channel_rms" if int(config["n_prefix"]) else "patch_channel_rms",
+            n_prefix=int(config["n_prefix"]),
+            metadata={
+                "K": codebook_size, "embedding_dim": embedding_dim,
+                "lmbda": float(config.get("assignment_lmbda", config["lmbda"])),
+                "epoch": epoch,
+                "step": 0 if step is None else step,
+            },
+        )
+        os.replace(temporary, destination)
+
     for epoch in range(start_epoch, epochs):
         codec.train()
         tau = temperature(
@@ -761,7 +859,7 @@ def main() -> None:
         started = time.time()
         progress = tqdm(batches, desc=f"train {epoch + 1}/{epochs}")
         rate_cap = None if config.get("rate_cap_bits_per_token") is None else float(config["rate_cap_bits_per_token"])
-        for batch in progress:
+        for batch_index, batch in enumerate(progress):
             optimizer.zero_grad(set_to_none=True)
             if grids is None:
                 for path in batch:
@@ -797,20 +895,21 @@ def main() -> None:
                 )
                 if tail is not None and len(getattr(tail, "blocks", [])) > 0:
                     assign_batch_rope(tail, [grids[feature_key(path, feature_root)] for path in batch])
-                distortion, rate_bits, commit_value, usage_step = accumulate_batch(
-                    raw,
-                    codec,
-                    prefix_rms,
-                    patch_rms,
-                    int(config["n_prefix"]),
-                    float(config["lmbda"]),
-                    float(config.get("commit_weight", 0.0)),
-                    tail,
-                    distortion_mode,
-                    rate_cap,
-                    float(config.get("rate_cap_weight", 0.0)),
-                    tail_dtype,
-                )
+                if config.get("token_normalized_loss", False):
+                    distortion, rate_bits, commit_value, usage_step = accumulate_token_normalized_batch(
+                        raw, codec, prefix_rms, patch_rms, int(config["n_prefix"]),
+                        float(config["lmbda"]), float(config.get("vector_weight", 0.0)), tail,
+                        int(config.get("microbatch_tokens", config["chunk_tokens"])),
+                        bool(config.get("relative_vector", False)),
+                        float(config.get("rate_weight", 1.0)),
+                    )
+                else:
+                    distortion, rate_bits, commit_value, usage_step = accumulate_batch(
+                        raw, codec, prefix_rms, patch_rms, int(config["n_prefix"]),
+                        float(config["lmbda"]), float(config.get("commit_weight", 0.0)),
+                        tail, distortion_mode, rate_cap, float(config.get("rate_cap_weight", 0.0)),
+                        tail_dtype,
+                    )
                 distortion_total += distortion
                 rate_total += rate_bits
                 commit_total += commit_value
@@ -819,6 +918,9 @@ def main() -> None:
                 del raw
             torch.nn.utils.clip_grad_norm_(codec.parameters(), float(config["grad_clip"]))
             optimizer.step()
+            interval = int(config.get("snapshot_interval_steps", 0))
+            if epoch == 0 and interval > 0 and (batch_index + 1) % interval == 0:
+                export_training_snapshot(epoch, batch_index + 1)
             progress.set_postfix(tau=f"{tau:.4f}")
         scheduler.step()
         val_metrics = evaluate(
@@ -839,7 +941,8 @@ def main() -> None:
             "seconds": time.time() - started,
             "lr": optimizer.param_groups[0]["lr"],
             "temperature": tau,
-            "commitment_mse": commit_total / element_count,
+            ("train_relative_vector_mse" if config.get("relative_vector", False) else
+             "train_vector_mse" if config.get("token_normalized_loss", False) else "commitment_mse"): commit_total / element_count,
             "distortion_sum": distortion_total / max(len(order), 1),
             "rate_bits_per_image": rate_total / max(len(order), 1),
             "rate_bits_per_token": rate_total / max(tokens_total, 1),
@@ -860,6 +963,8 @@ def main() -> None:
         if row[selection_key] < best_val:
             best_val = row[selection_key]
             save_checkpoint(output_dir / "best.pt", codec, optimizer, scheduler, epoch + 1, history, config)
+        if config.get("export_each_epoch", False):
+            export_training_snapshot(epoch + 1)
 
     best_path = output_dir / "best.pt"
     best_checkpoint = torch.load(best_path, map_location=device, weights_only=False)
@@ -870,15 +975,20 @@ def main() -> None:
         flush=True,
     )
     codec.eval()
-    pmf = histogram_pmf(
-        train_files,
-        codec,
-        prefix_rms,
-        patch_rms,
-        int(config["n_prefix"]),
-        int(config["chunk_tokens"]),
-        device,
-    )
+    if config.get("export_learned_prior", False):
+        pmf = codec.get_prior_pmf()
+        floor = float(config["prior_floor"])
+        pmf = (1.0 - floor) * pmf + floor / codebook_size
+    else:
+        pmf = histogram_pmf(
+            train_files,
+            codec,
+            prefix_rms,
+            patch_rms,
+            int(config["n_prefix"]),
+            int(config["chunk_tokens"]),
+            device,
+        )
     npz_path = output_dir / f"stage1_K{codebook_size}_e{embedding_dim}.npz"
     n_prefix = int(config["n_prefix"])
     default_backbone_name = "qwen3vl_8b_visual" if backbone_type == "qwen3vl" else "dinov3_vitl16"
@@ -890,7 +1000,7 @@ def main() -> None:
         "slot": int(config["slot"]),
         "K": codebook_size,
         "embedding_dim": embedding_dim,
-        "lmbda": float(config["lmbda"]),
+        "lmbda": float(config.get("assignment_lmbda", config["lmbda"])),
         "patch_channel_rms": patch_np,
         "rms_eps": float(config["rms_eps"]),
     }

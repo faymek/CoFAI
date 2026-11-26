@@ -136,7 +136,7 @@ class SoftPQ(nn.Module):
       Standard hard argmin PQ.
     """
 
-    def __init__(self, G, K, d, lmbda=0.0, prior_floor=0.0, shared=False):
+    def __init__(self, G, K, d, lmbda=0.0, prior_floor=0.0, shared=False, soft_rate=False):
         super().__init__()
         self.G = G
         self.K = K
@@ -147,6 +147,7 @@ class SoftPQ(nn.Module):
         self.prior_floor = prior_floor
         self.temperature = 0.0
         self.shared = bool(shared)
+        self.soft_rate = bool(soft_rate)
 
         if self.shared:
             self.codebooks = nn.Parameter(torch.randn(K, d) * 0.01)
@@ -242,9 +243,14 @@ class SoftPQ(nn.Module):
         usage.scatter_add_(1, labels, ones.unsqueeze(0).expand(self.G, -1))
 
         if self.use_rate:
-            gathered_rate = torch.gather(log2_pmf, 1, labels)
-            self._last_rate = gathered_rate.sum(0).mean()
-            self._last_rate_per_group = gathered_rate.mean(1)
+            if self.training and self.temperature > 0 and self.soft_rate:
+                # Hard forward, soft assignment gradient; the prior still sees
+                # the hard labels in its direct cross-entropy gradient.
+                rate_per_token = (weights * log2_pmf.unsqueeze(1)).sum(-1)
+            else:
+                rate_per_token = torch.gather(log2_pmf, 1, labels)
+            self._last_rate = rate_per_token.sum(0).mean()
+            self._last_rate_per_group = rate_per_token.mean(1)
         else:
             self._last_rate = torch.tensor(0.0, device=Z_flat.device)
             self._last_rate_per_group = None
